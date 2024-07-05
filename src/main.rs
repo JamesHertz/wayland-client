@@ -13,9 +13,9 @@ use std::{
 
 use log::info;
 use memmap::MmapOptions;
-use utils::join_shared_memory;
+// use utils::join_shared_memory;
 use wayland_client::protocol::{
-    api::{WaylandObject, WaylandRequest},
+    api::{ShmPixelFormat, WaylandObject, WaylandRequest},
     WaylandClient,
 };
 
@@ -136,6 +136,38 @@ fn main() -> color_eyre::Result<()> {
 
     let messages = client.pull_messages()?;
     info!("Gotten messages {messages:?}");
+
+    // 1920x1080
+    let width  : i32 = 1920;
+    let height : i32 = 1080;
+    let stride : i32 = 4 * width;
+    let window_size : i32 = 4 * height * stride;
+    let pool_size : i32 = 2 * window_size;
+
+    let (pool_id, mem_buffer_id) = client.create_pool(pool_size as usize)?;
+    {
+        let mem = client.get_shared_buffer(mem_buffer_id).unwrap();
+        mem.data.as_mut().fill(0);
+    }
+
+    info!("Created pool {pool_id}");
+    let buffer_id = client.new_id(WaylandObject::Buffer);
+    client.send_request(
+        pool_id, WaylandRequest::ShmPoolCreateBuffer { 
+            buffer_id,  offset: window_size, width, height, stride, pixel_format: ShmPixelFormat::Argb
+        }
+    )?;
+
+    info!("Created Buffer {buffer_id}");
+    info!("Waiting for errors");
+    thread::sleep(Duration::from_secs(60));
+
+    // let shm_id = client.get_global_mapping(WaylandObject::Shm).unwrap();
+    // let shared_buffer = client.create_buffer(1024 * 1024 * 4)?;
+
+    // shared_buffer.data.len();
+
+
     // let compositor   = client.get_global(WaylandObject::Compositor).unwrap();
     // let sufurface_id = client.new_id(WaylandObject::Surface);
     // client.send_request(
@@ -177,48 +209,4 @@ mod utils {
         pretty_env_logger::init();
     }
 
-    pub fn join_shared_memory(
-        fd: i32,
-        size: usize,
-    ) -> color_eyre::Result<MmapMut> {
-        info!("fd = {}", fd);
-        let file = unsafe { File::from_raw_fd(fd) };
-
-        file.set_len(size as u64)?;
-
-        let map = unsafe { MmapOptions::new().map_mut(&file)? };
-
-        Ok(map)
-    }
-
-    pub fn shared_memory(size: usize) -> color_eyre::Result<File> {
-        let filename = b"my-custom-file\0".as_ptr() as *const libc::c_char;
-        let fd = unsafe {
-            libc::shm_open(
-                filename,
-                libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
-                0o666,
-            )
-        };
-
-        if fd < 0 {
-            return Err(eyre!(
-                "Error creating with shm_open '{}'",
-                errno::errno()
-            ));
-        }
-
-        let res = unsafe { libc::shm_unlink(filename) };
-        if res < 0 {
-            return Err(eyre!("Error unlinking '{}'", errno::errno()));
-        }
-
-        let file = unsafe { File::from_raw_fd(fd) };
-
-        file.set_len(size as u64)?;
-
-        // let map = unsafe { MmapOptions::new().map_mut(&file)? };
-
-        Ok(file)
-    }
 }

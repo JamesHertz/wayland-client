@@ -1,3 +1,4 @@
+// TODO: move this to the parser module c:
 macro_rules! unmarshall_event {
 
     (@helper $init : expr, Uint32) => {
@@ -39,6 +40,7 @@ macro_rules! unmarshall_event {
     };
 }
 
+// TODO: same as above
 macro_rules! marshall_values {
     ($buffer : ident, $($type : ident ( $value : expr) ),+) => {
         parser::write_bytes(
@@ -60,23 +62,6 @@ pub struct WaylandEventMessage {
     pub event: WaylandEvent,
 }
 
-#[derive(Debug)]
-pub enum WaylandRequest {
-    DisplaySync(u32),
-    DisplayGetRegistry(u32),
-    CompositorCreateSurface(u32),
-    XdgWmGetSurface {
-        new_id: u32,
-        surface: u32,
-    },
-    RegistryBind {
-        name: u32,
-        interface: String,
-        version: u32,
-        new_id: u32,
-    },
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum WaylandEvent {
     DisplayError {
@@ -91,12 +76,7 @@ pub enum WaylandEvent {
         version: u32,
     },
     CallBackDone(u32),
-    ShmFormat(u32)
-    // ShmCreatePool{
-    //     pool_id : u32,
-    //     fd      : u32,
-    //     size    : i32
-    // }
+    ShmFormat(u32),
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
@@ -111,6 +91,7 @@ pub enum WaylandObject {
     Shm,
     ShmPool,
     XdgWmBase,
+    Buffer,
 }
 
 impl WaylandObject {
@@ -156,11 +137,47 @@ impl WaylandObject {
     pub fn from_interface(interface: &str) -> Option<Self> {
         match interface {
             "wl_compositor" => Some(WaylandObject::Compositor),
-            "xdg_wm_base"   => Some(WaylandObject::XdgWmBase),
-            "wl_shm"        => Some(WaylandObject::Shm),
+            "xdg_wm_base" => Some(WaylandObject::XdgWmBase),
+            "wl_shm" => Some(WaylandObject::Shm),
             _ => None,
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ShmPixelFormat {
+    Argb = 0,
+    Xrgb = 1,
+}
+
+#[derive(Debug)]
+pub enum WaylandRequest {
+    DisplaySync(u32),
+    DisplayGetRegistry(u32),
+    CompositorCreateSurface(u32),
+    XdgWmGetSurface {
+        new_id: u32,
+        surface: u32,
+    },
+    RegistryBind {
+        name: u32,
+        interface: String,
+        version: u32,
+        new_id: u32,
+    },
+    ShmCreatePool {
+        pool_id: ObjectId,
+        fd: i32,
+        size: i32,
+    },
+    ShmPoolCreateBuffer {
+        buffer_id: ObjectId,
+        offset: i32,
+        width: i32,
+        height: i32,
+        stride: i32,
+        pixel_format: ShmPixelFormat,
+    },
 }
 
 impl WaylandRequest {
@@ -171,6 +188,8 @@ impl WaylandRequest {
             Self::CompositorCreateSurface(_) => 0,
             Self::XdgWmGetSurface { .. } => 0,
             Self::RegistryBind { .. } => 0,
+            Self::ShmCreatePool { .. } => 0,
+            Self::ShmPoolCreateBuffer { .. } => 0,
         }
     }
 
@@ -198,18 +217,34 @@ impl WaylandRequest {
                     Uint32(new_id)
                 )
             }
+            Self::ShmCreatePool { pool_id, fd, size } => {
+                // u32 as i32 doesn't make any difference for marshalling
+                marshall_values!(
+                    buffer,
+                    Uint32(pool_id),
+                    Int32(fd),
+                    Int32(size)
+                )
+            }
+
+            Self::ShmPoolCreateBuffer {
+                buffer_id,
+                offset,
+                width,
+                height,
+                stride,
+                pixel_format,
+            } => {
+                marshall_values!(
+                    buffer,
+                    Uint32(buffer_id),
+                    Int32(dbg!(offset)),
+                    Int32(dbg!(width)),
+                    Int32(dbg!(height)),
+                    Int32(dbg!(stride)),
+                    Uint32(pixel_format as u32)
+                )
+            }
         }
     }
 }
-
-// #[allow(unused_variables)]
-// impl WaylandEvent {
-//     pub fn event_id(&self) -> u16 {
-//         match self {
-//             Self::DisplayError { .. } => 0,
-//             Self::RegistryGlobal { .. } => 0,
-//             Self::CallBackDone(_)  => 0,
-//             Self::DisplayDelete(_) => 1,
-//         }
-//     }
-// }

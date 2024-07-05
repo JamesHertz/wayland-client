@@ -12,9 +12,9 @@ pub enum MsgArgType {
 #[derive(Debug)]
 pub enum MsgArgValue {
     Uint32(u32),
+    Int32(i32),
     String(String),
 }
-
 
 // returns the size aligned to 4 bytes (means 32 bits)
 fn str_aligned_size(base_size : usize) -> usize {
@@ -29,16 +29,22 @@ impl MsgArgValue {
         }
     }
 
+
+    pub fn into_i32(self) -> i32 {
+        match self {
+            MsgArgValue::Int32(val) => val,
+            x => panic!("Expected i32 arg value but found {x:?}"),
+        }
+    }
     pub fn into_u32(self) -> u32 {
         match self {
             MsgArgValue::Uint32(val) => val,
-            x => panic!("Expected int arg value but found {x:?}"),
+            x => panic!("Expected u32 arg value but found {x:?}"),
         }
     }
 }
 
 pub struct Parser<'a>(&'a [MsgArgType]);
-
 impl<'a> Parser<'a> {
     pub fn new(pattern: &'a [MsgArgType]) -> Self {
         Parser(pattern)
@@ -95,6 +101,9 @@ pub fn write_bytes(values: &[MsgArgValue], writer: &mut impl Write) -> std::io::
     for value in values {
         match value {
             MsgArgValue::Uint32(val) => {
+                writer.write_all(&val.to_ne_bytes()).unwrap()
+            }
+            MsgArgValue::Int32(val) => {
                 writer.write_all(&val.to_ne_bytes()).unwrap()
             }
             MsgArgValue::String(val) => {

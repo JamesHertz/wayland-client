@@ -1,19 +1,26 @@
 #![allow(unused_imports)]
 pub mod api;
+mod buffers;
 pub mod parser;
 mod wire_messages;
 
 use self::api::{
     WaylandEvent, WaylandEventMessage, WaylandObject, WaylandRequest,
 };
+use crate::protocol::buffers::ByteBuffer;
 
-use log::{debug, error, info, warn};
+use api::ObjectId;
+use buffers::SharedBuffer;
+use log::{debug, error, info, trace, warn};
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
-    io::Read,
+    io::{IoSlice, Read},
     iter,
-    os::unix::net::UnixStream,
+    os::{
+        fd::{AsFd, AsRawFd},
+        unix::net::{SocketAncillary, UnixStream},
+    },
     sync::{
         mpsc::{self, Receiver, Sender, TryRecvError},
         Arc, Mutex,
@@ -23,9 +30,10 @@ use std::{
 };
 
 type Locked<T> = Arc<Mutex<T>>;
-type CustomResult<T> = Result<T, WaylandClientError>;
+type CustomResult<T> = std::result::Result<T, WaylandClientError>;
 type LockedProtocolIds = Locked<HashMap<u32, WaylandObject>>;
-
+type Result<T> = color_eyre::Result<T>;
+pub type BufferId = usize;
 
 struct ProtocolState {
     shm_format: Vec<u32>,
@@ -39,9 +47,8 @@ impl ProtocolState {
     }
 }
 
-
-// #![allow(dead_code)]
 pub struct WaylandClient {
+    #[allow(dead_code)]
     proto_state: Arc<Mutex<ProtocolState>>,
     socket: UnixStream,
     ids: LockedProtocolIds,
@@ -49,6 +56,7 @@ pub struct WaylandClient {
     ids_count: u32,
     display_id: u32,
     channel: Receiver<WaylandEventMessage>,
+    buffers: Vec<SharedBuffer>,
 }
 
 #[derive(Debug)]
@@ -95,10 +103,10 @@ impl WaylandClient {
             ids_count: 2,
             display_id: mapped.get(&WaylandObject::Display).copied().unwrap(),
             mapped,
+            buffers: Vec::new(),
         })
     }
 
-    // TODO: I dont quite understand this very well, so you should come ack to this
     pub fn map_global(
         &mut self,
         name: u32,
@@ -127,6 +135,48 @@ impl WaylandClient {
         );
 
         Ok(())
+    }
+
+
+    pub fn get_shared_buffer(&mut self, buffer_id : usize) -> Option<&mut SharedBuffer> {
+        if buffer_id >= self.buffers.len() {
+            return None
+        }
+
+        Some(&mut self.buffers[buffer_id])
+    }
+
+    pub fn create_pool(
+        &mut self,
+        size: usize,
+    ) -> Result<(ObjectId, usize)> {
+        let shm_id = self.get_global_mapping(WaylandObject::Shm).unwrap();
+        let pool_id = self.new_id(WaylandObject::ShmPool);
+        let shared_buffer = SharedBuffer::alloc(size)?;
+
+        let mut payload = Vec::new();
+        let shm_file_fd = shared_buffer.file_fd();
+        wire_messages::make_request(
+            &mut payload,
+            shm_id,
+            WaylandRequest::ShmCreatePool {
+                pool_id,
+                fd: shm_file_fd,
+                size: size as i32,
+            },
+        )?;
+
+        let mut ancillary_buffer = [0; 128];
+        let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
+        ancillary.add_fds(&[shm_file_fd][..]);
+
+        self.socket.send_vectored_with_ancillary(
+            &[IoSlice::new(&payload)][..],
+            &mut ancillary,
+        )?;
+
+        self.buffers.push(shared_buffer);
+        Ok((pool_id, self.buffers.len() - 1))
     }
 
     pub fn get_global_mapping(&self, obj_type: WaylandObject) -> Option<u32> {
@@ -184,6 +234,8 @@ impl WaylandClient {
         }
         Ok(())
     }
+
+    // pub fn create_pull() -> core
 
     pub fn pull_messages(
         &mut self,
@@ -299,89 +351,32 @@ impl ReceiverThread {
     }
 
     fn start(mut self) {
-        thread::spawn(move || {
-            loop {
-                let msg = self.wait_for_msg();
+        thread::spawn(move || loop {
+            let msg = self.wait_for_msg();
 
-                if let Err(err) = msg {
-                    error!("Error processing a message {err:?}");
-                    continue;
+            if let Err(err) = msg {
+                match err {
+                    WaylandClientError::NoMessage => {
+                        warn!("Received no message waiting a few milliseconds");
+                        thread::sleep(Duration::from_millis(100));
+                    },
+                    WaylandClientError::RandomError(err) => {
+                        error!("Error processing a message {err:?}");
+                    }
                 }
+                continue;
+            }
 
-                let msg = msg.unwrap();
-                if let Some(msg) = self.callbacks.try_call(msg) {
-                    self.channel
-                        .send(msg)
-                        .expect("Couldn't send event message over channel");
-                }
+            let msg = msg.unwrap();
+            if let Some(msg) = self.callbacks.try_call(msg) {
+                trace!("Shipping +1 message");
+                self.channel
+                    .send(msg)
+                    .expect("Couldn't send event message over channel");
             }
         });
     }
 }
-
-struct ByteBuffer {
-    data: Box<[u8]>,
-    head: usize,
-    tail: usize,
-}
-
-impl ByteBuffer {
-    fn new(size: usize) -> Self {
-        ByteBuffer {
-            head: 0,
-            tail: 0,
-            data: iter::repeat(0u8)
-                .take(size)
-                .collect::<Vec<u8>>()
-                .into_boxed_slice(),
-        }
-    }
-
-    fn cached_bytes(&self) -> usize {
-        self.tail - self.head
-    }
-
-    fn tail_space(&self) -> usize {
-        self.data.len() - self.tail
-    }
-
-    fn read_bytes(
-        &mut self,
-        bytes: usize,
-        reader: &mut impl Read,
-    ) -> std::io::Result<Option<&[u8]>> {
-        assert!(bytes < 1 << 11);
-        let cached_bytes = self.cached_bytes();
-        assert!(cached_bytes == 0 || cached_bytes < 2 << 14);
-        if bytes <= cached_bytes {
-            let res = &self.data[self.head..self.head + bytes];
-            self.head += bytes;
-            return Ok(Some(res));
-        }
-
-        let left_space = self.tail_space();
-        if cached_bytes + left_space < bytes {
-            debug!("Doing moves ...");
-            self.data.copy_within(self.head..self.tail, 0);
-            self.head = 0;
-            self.tail = cached_bytes;
-        }
-
-        let size = reader.read(&mut self.data[self.tail..])?;
-        self.tail += size;
-
-        debug!("new request of {size} bytes");
-
-        if size + cached_bytes < bytes {
-            return Ok(None);
-        }
-
-        let res = &self.data[self.head..self.head + bytes];
-        self.head += bytes;
-        Ok(Some(res))
-    }
-}
-
 
 struct AsyncCallBack {
     proto_state: Locked<ProtocolState>,
