@@ -91,6 +91,7 @@ pub enum WaylandEvent {
         version: u32,
     },
     CallBackDone(u32),
+    ShmFormat(u32)
     // ShmCreatePool{
     //     pool_id : u32,
     //     fd      : u32,
@@ -107,7 +108,8 @@ pub enum WaylandObject {
     Surface,
     XdgSurface,
     // ZLayerShell,
-    // ShmPool,
+    Shm,
+    ShmPool,
     XdgWmBase,
 }
 
@@ -140,7 +142,11 @@ impl WaylandObject {
                 unmarshall_event!(buffer, CallBackDone(Uint32))
             }
 
-            Self::Display | Self::CallBack => {
+            Self::Shm if event_id == 0 => {
+                unmarshall_event!(buffer, ShmFormat(Uint32))
+            }
+
+            Self::Display | Self::CallBack | Self::Shm => {
                 Err(eyre!("Invalid message {event_id} for {:?}", self))
             }
             _ => todo!(),
@@ -150,7 +156,8 @@ impl WaylandObject {
     pub fn from_interface(interface: &str) -> Option<Self> {
         match interface {
             "wl_compositor" => Some(WaylandObject::Compositor),
-            "xdg_wm_base" => Some(WaylandObject::XdgWmBase),
+            "xdg_wm_base"   => Some(WaylandObject::XdgWmBase),
+            "wl_shm"        => Some(WaylandObject::Shm),
             _ => None,
         }
     }

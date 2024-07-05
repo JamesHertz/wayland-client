@@ -3,7 +3,10 @@
 use std::{
     env,
     io::{IoSlice, IoSliceMut},
-    os::{fd::{AsFd, AsRawFd}, unix::net::{AncillaryData, SocketAncillary, UnixListener, UnixStream}},
+    os::{
+        fd::{AsFd, AsRawFd},
+        unix::net::{AncillaryData, SocketAncillary, UnixListener, UnixStream},
+    },
     thread,
     time::Duration,
 };
@@ -11,7 +14,10 @@ use std::{
 use log::info;
 use memmap::MmapOptions;
 use utils::join_shared_memory;
-use wayland_client::protocol::{api::{WaylandObject, WaylandRequest}, WaylandClient};
+use wayland_client::protocol::{
+    api::{WaylandObject, WaylandRequest},
+    WaylandClient,
+};
 
 const SOCK_FILE: &str = "test.sock";
 // notes: [1, 0XFEFFFFFF]
@@ -122,14 +128,14 @@ fn main() -> color_eyre::Result<()> {
     // }
 
     let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
-    
+
     client.load_interfaces()?;
 
     info!("Waiting to see if any error will arrive!");
-    thread::sleep(
-        Duration::from_secs(30)
-    );
-    
+    thread::sleep(Duration::from_secs(30));
+
+    let messages = client.pull_messages()?;
+    info!("Gotten messages {messages:?}");
     // let compositor   = client.get_global(WaylandObject::Compositor).unwrap();
     // let sufurface_id = client.new_id(WaylandObject::Surface);
     // client.send_request(
@@ -171,7 +177,10 @@ mod utils {
         pretty_env_logger::init();
     }
 
-    pub fn join_shared_memory(fd: i32, size : usize) -> color_eyre::Result<MmapMut> {
+    pub fn join_shared_memory(
+        fd: i32,
+        size: usize,
+    ) -> color_eyre::Result<MmapMut> {
         info!("fd = {}", fd);
         let file = unsafe { File::from_raw_fd(fd) };
 
@@ -184,11 +193,19 @@ mod utils {
 
     pub fn shared_memory(size: usize) -> color_eyre::Result<File> {
         let filename = b"my-custom-file\0".as_ptr() as *const libc::c_char;
-        let fd =
-            unsafe { libc::shm_open(filename, libc::O_CREAT | libc::O_EXCL | libc::O_RDWR, 0o666) };
+        let fd = unsafe {
+            libc::shm_open(
+                filename,
+                libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
+                0o666,
+            )
+        };
 
         if fd < 0 {
-            return Err(eyre!("Error creating with shm_open '{}'", errno::errno()));
+            return Err(eyre!(
+                "Error creating with shm_open '{}'",
+                errno::errno()
+            ));
         }
 
         let res = unsafe { libc::shm_unlink(filename) };
