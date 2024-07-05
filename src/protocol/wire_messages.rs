@@ -19,6 +19,7 @@ pub fn make_request(
 ) -> color_eyre::Result<()> {
     let mut buffer = Vec::new();
 
+    let request_id = request.request_id();
     buffer.write_all(&object_id.to_ne_bytes())?;
     buffer.write_all(&0u32.to_ne_bytes())?;
     request.write_data(&mut buffer)?;
@@ -28,7 +29,7 @@ pub fn make_request(
         return Err(eyre!("Data size {} missaligned or overflowed", size));
     }
 
-    let size_and_event_id = (size as u32) << 16 | request.request_id() as u32;
+    let size_and_event_id = (size as u32) << 16 | request_id as u32;
     let bytes = size_and_event_id.to_ne_bytes();
     buffer[4..8].copy_from_slice(&bytes);
 

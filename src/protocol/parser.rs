@@ -1,21 +1,24 @@
-use std::io::Write;
+use std::{io::Write, iter};
 
 use color_eyre::eyre::{eyre, Context};
 use log::debug;
 
 #[derive(Clone, Copy, Debug)]
 pub enum MsgArgType {
-    ObjectId,
-    // NewId, // FIXME: handle this some day
     Uint32,
     String,
 }
 
 #[derive(Debug)]
 pub enum MsgArgValue {
-    ObjectId(u32),
     Uint32(u32),
     String(String),
+}
+
+
+// returns the size aligned to 4 bytes (means 32 bits)
+fn str_aligned_size(base_size : usize) -> usize {
+    ((base_size + 4 - 1) / 4) * 4
 }
 
 impl MsgArgValue {
@@ -28,7 +31,7 @@ impl MsgArgValue {
 
     pub fn into_u32(self) -> u32 {
         match self {
-            MsgArgValue::ObjectId(val) | MsgArgValue::Uint32(val) => val,
+            MsgArgValue::Uint32(val) => val,
             x => panic!("Expected int arg value but found {x:?}"),
         }
     }
@@ -65,7 +68,6 @@ impl<'a> Parser<'a> {
             let buf = &buffer[consumed..];
             values.push(match arg {
                 MsgArgType::Uint32 => MsgArgValue::Uint32(value),
-                MsgArgType::ObjectId => MsgArgValue::ObjectId(value),
                 MsgArgType::String => {
                     let str_size = value as usize;
 
@@ -77,9 +79,8 @@ impl<'a> Parser<'a> {
 
                     let message = std::str::from_utf8(&buf[..str_size - 1])
                         .wrap_err("parsing request string")?;
-                    debug!("str_size: {str_size}");
 
-                    consumed += ((str_size - 1 + 4) / 4) * 4;
+                    consumed += str_aligned_size(str_size); //((str_size - 1 + 4) / 4) * 4;
                     MsgArgValue::String(String::from(message))
                 }
             });
@@ -93,10 +94,23 @@ impl<'a> Parser<'a> {
 pub fn write_bytes(values: &[MsgArgValue], writer: &mut impl Write) -> std::io::Result<()> {
     for value in values {
         match value {
-            MsgArgValue::ObjectId(val) | MsgArgValue::Uint32(val) => {
+            MsgArgValue::Uint32(val) => {
                 writer.write_all(&val.to_ne_bytes()).unwrap()
             }
-            _ => todo!(),
+            MsgArgValue::String(val) => {
+                let bytes = val.as_bytes();
+                let size = 1 + bytes.len() as u32; // +1 because of the 'null terminator'
+                writer.write_all(&size.to_ne_bytes()).unwrap();
+                writer.write_all(bytes).unwrap();
+                writer.write_all(&[0;1]).unwrap(); // the 'null terminator'
+
+                let size = size as usize;
+                let padding = str_aligned_size(size) - size;
+
+                let buf : Vec<u8> = iter::repeat(0u8).take(padding).collect();
+                assert!(buf.len() == padding);
+                writer.write_all(&buf).unwrap();
+            }
         }
     }
 
