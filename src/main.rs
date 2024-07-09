@@ -25,108 +25,6 @@ fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     utils::init_log();
 
-    // info!("Let start the joke");
-    //
-    // let mut args = env::args();
-    // args.next();
-    // let role = args.next().expect("Expected process role");
-    //
-    // match role.as_str() {
-    //     "server" => {
-    //         info!("Starting server ...");
-    //         let sock = UnixListener::bind(SOCK_FILE)?;
-    //         loop {
-    //             let (connection, addr) = sock.accept()?;
-    //             info!("Incomming connection from {addr:?}");
-    //
-    //             let mut ancillary_buffer = [0; 256];
-    //             let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
-    //
-    //             let mut buf = [1; 256];
-    //             // let mut bufs = &mut [IoSliceMut::new(&mut buf[..])][..];
-    //             let size = connection.recv_vectored_with_ancillary(
-    //                 &mut [IoSliceMut::new(&mut buf[..])][..],
-    //                 &mut ancillary,
-    //             )?;
-    //
-    //             let fds: Vec<i32> = ancillary
-    //                 .messages()
-    //                 .flat_map(|msg| {
-    //                     if let AncillaryData::ScmRights(scm_rights) = msg.unwrap() {
-    //                         scm_rights.into_iter().collect()
-    //                     } else {
-    //                         vec![]
-    //                     }
-    //                 })
-    //                 .collect();
-    //             info!("received {size} bytes and fds {fds:?}");
-    //
-    //             assert!(!fds.is_empty());
-    //             let original = i32::from_ne_bytes(
-    //                 buf[..4].try_into().expect("Getting original fd")
-    //             );
-    //
-    //             let mapped_size = usize::from_ne_bytes (
-    //                 buf[4..size].try_into().expect("Getting mapped size")
-    //             );
-    //
-    //             info!("Original fd was {original} and mapped size {mapped_size}");
-    //
-    //             let mem = join_shared_memory(fds[0], mapped_size)?;
-    //             info!("Created mappend memory");
-    //
-    //             let buffer = mem.as_ref();
-    //             for _ in 0..1000 {
-    //                 info!("buffer position 0 is {}", buffer[0]);
-    //                 thread::sleep(Duration::from_secs(10));
-    //             }
-    //
-    //             info!("Done, waiting for a new client")
-    //         }
-    //     }
-    //     "client" => {
-    //         info!("starting the client ...");
-    //         let mapped_size = 1024;
-    //         let file = utils::shared_memory(mapped_size)?;
-    //         let fd = file.as_raw_fd();
-    //         info!("Sucessfully created shared memory with fd {fd}");
-    //
-    //         let sock = UnixStream::connect(SOCK_FILE)?;
-    //
-    //         let mut ancillary_buffer = [0; 128];
-    //         let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
-    //         ancillary.add_fds(&[fd][..]);
-    //
-    //         let mut buf = [0; 256];
-    //         buf[..4].copy_from_slice(
-    //             &fd.to_ne_bytes()
-    //         );
-    //         buf[4..12].copy_from_slice(
-    //             &mapped_size.to_ne_bytes()
-    //         );
-    //
-    //         // let buf = fd.to_ne_bytes();
-    //         let size =
-    //             sock.send_vectored_with_ancillary(&[IoSlice::new(&buf[..12])][..], &mut ancillary)?;
-    //
-    //         info!("Sent {size} bytes");
-    //
-    //         thread::sleep(Duration::from_secs(5));
-    //         let mut mem = unsafe { MmapOptions::new().map_mut(&file)? };
-    //         let buffer = mem.as_mut();
-    //         let mut i = 0u8;
-    //         loop {
-    //             buffer[0] = i;
-    //             info!("Settted buf 0 to {i}");
-    //             i = (i + 1) % u8::MAX;
-    //             thread::sleep(Duration::from_secs(10));
-    //         }
-    //
-    //         // loop{}
-    //     }
-    //     _ => panic!("Invalid role {role}"),
-    // }
-
     let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
 
     client.load_interfaces()?;
@@ -138,8 +36,10 @@ fn main() -> color_eyre::Result<()> {
     info!("Gotten messages {messages:?}");
 
     // 1920x1080
-    let width  : i32 = 1920;
+    let width  : i32 = 1920; 
     let height : i32 = 1080;
+    // let width  : i32 = 960; 
+    // let height : i32 = 1030;
     let stride : i32 = 4 * width;
     let window_size : i32 = 4 * height * stride;
     let pool_size   : i32 = 2 * window_size;
@@ -152,17 +52,109 @@ fn main() -> color_eyre::Result<()> {
         info!("Mem size {}", mem.data.len())
     }
 
-    info!("Created pool {pool_id}");
+    info!("Created pool {pool_id} ...");
+    thread::sleep(Duration::from_secs(1));
+
     let buffer_id = client.new_id(WaylandObject::Buffer);
     client.send_request(
         pool_id, WaylandRequest::ShmPoolCreateBuffer { 
-            buffer_id,  offset: window_size, width, height, stride, pixel_format: ShmPixelFormat::Argb
+            buffer_id,  offset: 0, width, height, stride, pixel_format: ShmPixelFormat::Xrgb
         }
     )?;
 
-    info!("Created Buffer {buffer_id}");
+    info!("Created Buffer {buffer_id} ...");
+
+    let surface_id = {
+        let compositor_id = client.get_global_mapping(
+            WaylandObject::Compositor
+        ).unwrap();
+        let surface_id= client.new_id(WaylandObject::Surface);
+        client.send_request(
+            compositor_id,
+            WaylandRequest::CompositorCreateSurface(surface_id)
+        )?;
+        info!("Created surface {surface_id} ... ");
+        thread::sleep(Duration::from_secs(1));
+
+
+        // client.send_request(
+        //     surfarce_id, 
+        //     WaylandRequest::SufaceCommit
+        // )?;
+        // info!("Commited Surface");
+        surface_id
+    };
+
+    let window_xdg_surface_id = {
+        let xdg_wm_base_id = client.get_global_mapping(
+            WaylandObject::XdgWmBase
+        ).unwrap();
+
+        let xdg_suface_id = client.new_id(WaylandObject::XdgSurface);
+        client.send_request(
+            xdg_wm_base_id, 
+            WaylandRequest::XdgWmGetSurface { 
+                new_id: xdg_suface_id, surface: surface_id
+            }
+        )?;
+
+        info!("Got an xdg_suface {xdg_suface_id} ...");
+        thread::sleep(Duration::from_secs(1));
+
+        let top_level_id = client.new_id(WaylandObject::XdgTopLevel);
+        client.send_request(
+            xdg_suface_id,
+            WaylandRequest::XdgSurfaceGetTopLevel(top_level_id)
+        )?;
+
+        info!("Got an xdg_top_level {top_level_id} ...");
+        thread::sleep(Duration::from_secs(1));
+
+        top_level_id
+    };
+
+    client.send_request(
+        window_xdg_surface_id,
+        WaylandRequest::XdgTopLevelSetTitle("Example app".to_string())
+    )?;
+    
+    info!("Set xdg_top_level {window_xdg_surface_id} to 'Example app' ...");
+    thread::sleep(Duration::from_secs(1));
+
+    client.send_request(
+        surface_id, 
+        WaylandRequest::SufaceCommit
+    )?;
+
+    info!("Committed surface");
+    thread::sleep(Duration::from_secs(1));
+
+    client.send_request(
+        surface_id, 
+        WaylandRequest::SufaceAttach { 
+            buffer_id, x: 0, y : 0 
+        }
+    )?;
+
+    info!("Attached surface {surface_id} to buffer {buffer_id} ...");
+    thread::sleep(Duration::from_secs(1));
+
+    let mem = client.get_shared_buffer(mem_buffer_id).unwrap();
+    for i in (1..window_size).step_by(4) {
+        mem.data.as_mut()[i as usize] = 255;
+    }
+
+    client.send_request(
+        surface_id, 
+        WaylandRequest::SufaceCommit
+    )?;
+    
+    info!("Committed surface");
     info!("Waiting for errors");
-    thread::sleep(Duration::from_secs(60));
+
+
+
+    loop{}
 
     // let shm_id = client.get_global_mapping(WaylandObject::Shm).unwrap();
     // let shared_buffer = client.create_buffer(1024 * 1024 * 4)?;

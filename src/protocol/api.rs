@@ -9,8 +9,16 @@ macro_rules! unmarshall_event {
         $init.into_str()
     };
 
+    (@helper $init : expr, Int32) => {
+        $init.into_i32()
+    };
+
+    (@helper $init : expr, Array) => {
+        $init.into_array()
+    };
+
     (@helper $init : expr, $x : ident) => {
-        compile_error!(concat!("Unexpected type: ", stringify!($x), ". I should be either Uint32 or String."))
+        compile_error!(concat!("Unexpected type: ", stringify!($x), ". I should be Int32, Uint32, String or Array."))
     };
 
     (@expand_results $buffer : ident, $($type : ident,)+) => {
@@ -49,8 +57,9 @@ macro_rules! marshall_values {
     };
 }
 
-use super::parser::{self, MsgArgType, MsgArgValue, Parser};
+use super::parser::{self, Array,MsgArgType, MsgArgValue, Parser};
 use color_eyre::eyre::eyre;
+use log::warn;
 use std::{io::Write, str::FromStr};
 
 pub type ObjectId = u32;
@@ -77,6 +86,17 @@ pub enum WaylandEvent {
     },
     CallBackDone(u32),
     ShmFormat(u32),
+    XdgSurfaceConfigure(u32),
+    XdgTopLevelConfigure {
+        width  : u32,
+        height : u32,
+        states : Array,
+    }
+    // XdgSurfaceTopLevelConfigure {
+    //     width  : i32,
+    //     height : i32,
+    // }
+    // EventCapabities()
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
@@ -92,6 +112,7 @@ pub enum WaylandObject {
     ShmPool,
     XdgWmBase,
     Buffer,
+    XdgTopLevel,
 }
 
 impl WaylandObject {
@@ -100,37 +121,50 @@ impl WaylandObject {
         event_id: u16,
         buffer: &[u8],
     ) -> color_eyre::Result<WaylandEvent> {
-        match self {
-            Self::Display if event_id == 0 => {
-                unmarshall_event!(buffer, DisplayError {
-                    object_id => Uint32,
+        match (self, event_id) {
+            (Self::Display, 0) => {
+                unmarshall_event!(buffer, DisplayError { object_id => Uint32,
                     code      => Uint32,
                     message   => String,
                 })
             }
-            Self::Display if event_id == 1 => {
+            (Self::Display, 1) => {
                 unmarshall_event!(buffer, DisplayDelete(Uint32))
             }
 
-            Self::Registry if event_id == 0 => {
+            (Self::Registry, 0) => {
                 unmarshall_event!(buffer, RegistryGlobal {
                     name      => Uint32,
                     interface => String,
                     version   => Uint32,
                 })
             }
-            Self::CallBack if event_id == 0 => {
+
+            (Self::CallBack, 0) => {
                 unmarshall_event!(buffer, CallBackDone(Uint32))
             }
 
-            Self::Shm if event_id == 0 => {
+            (Self::Shm, 0) => {
                 unmarshall_event!(buffer, ShmFormat(Uint32))
             }
 
-            Self::Display | Self::CallBack | Self::Shm => {
+            (Self::Display | Self::CallBack | Self::Shm, _) => {
                 Err(eyre!("Invalid message {event_id} for {:?}", self))
             }
-            _ => todo!(),
+            (Self::XdgTopLevel, 3)| (Self::Buffer, 0)  => {
+                warn!("Receiving event {event_id} for {self:?} ... Ignoring and emitting ShmFormat(0)");
+                Ok( WaylandEvent::ShmFormat(0) )
+            }
+            (Self::XdgSurface, 0) => unmarshall_event!(buffer, XdgSurfaceConfigure(Uint32)),
+
+            (Self::XdgTopLevel, 0) => {
+                unmarshall_event!(buffer, XdgTopLevelConfigure {
+                    width  => Uint32,
+                    height => Uint32,
+                    states => Array,
+                })
+            }
+            _ => Err(eyre!("Event {event_id} for {self:?} doesn't have handler"))
         }
     }
 
@@ -178,6 +212,15 @@ pub enum WaylandRequest {
         stride: i32,
         pixel_format: ShmPixelFormat,
     },
+    SufaceAttach {
+        buffer_id : ObjectId,
+        x : u32,
+        y : u32
+    },
+    SufaceCommit,
+    XdgSurfaceGetTopLevel(ObjectId),
+    XdgTopLevelSetTitle(String),
+    XdgSurfaceAckConfigure(u32),
 }
 
 impl WaylandRequest {
@@ -186,10 +229,15 @@ impl WaylandRequest {
             Self::DisplaySync(_) => 0,
             Self::DisplayGetRegistry(_) => 1,
             Self::CompositorCreateSurface(_) => 0,
-            Self::XdgWmGetSurface { .. } => 0,
+            Self::XdgWmGetSurface { .. } => 2,
             Self::RegistryBind { .. } => 0,
             Self::ShmCreatePool { .. } => 0,
             Self::ShmPoolCreateBuffer { .. } => 0,
+            Self::SufaceAttach { .. } => 1,
+            Self::SufaceCommit => 6,
+            Self::XdgSurfaceGetTopLevel(_) => 1,
+            Self::XdgTopLevelSetTitle(_) => 1,
+            Self::XdgSurfaceAckConfigure(_) => 4,
         }
     }
 
@@ -197,7 +245,10 @@ impl WaylandRequest {
         match self {
             Self::DisplaySync(value)
             | Self::DisplayGetRegistry(value)
-            | Self::CompositorCreateSurface(value) => {
+            | Self::CompositorCreateSurface(value) 
+            | Self::XdgSurfaceGetTopLevel(value) 
+            | Self::XdgSurfaceAckConfigure(value)
+            => {
                 marshall_values!(buffer, Uint32(value))
             }
             Self::XdgWmGetSurface { new_id, surface } => {
@@ -217,16 +268,15 @@ impl WaylandRequest {
                     Uint32(new_id)
                 )
             }
-            Self::ShmCreatePool { pool_id, fd, size } => {
+            Self::ShmCreatePool { pool_id, fd : _, size } => {
                 // u32 as i32 doesn't make any difference for marshalling
                 marshall_values!(
                     buffer,
                     Uint32(pool_id),
-                    Int32(fd),
+                    // Int32(fd), // TODO: think about this ...
                     Int32(size)
                 )
             }
-
             Self::ShmPoolCreateBuffer {
                 buffer_id,
                 offset,
@@ -238,13 +288,20 @@ impl WaylandRequest {
                 marshall_values!(
                     buffer,
                     Uint32(buffer_id),
-                    Int32(dbg!(offset)),
-                    Int32(dbg!(width)),
-                    Int32(dbg!(height)),
-                    Int32(dbg!(stride)),
+                    Int32(offset),
+                    Int32(width),
+                    Int32(height),
+                    Int32(stride),
                     Uint32(pixel_format as u32)
                 )
-            }
+            },
+            Self::SufaceAttach { buffer_id, x, y } => {
+                marshall_values!(buffer, Uint32(buffer_id), Uint32(x), Uint32(y))
+            },
+            Self::SufaceCommit => Ok(()),
+            Self::XdgTopLevelSetTitle(title) => {
+               marshall_values!(buffer, String(title))
+            },
         }
     }
 }

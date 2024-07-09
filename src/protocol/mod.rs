@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
+pub mod parser;
 pub mod api;
 mod buffers;
-pub mod parser;
 mod wire_messages;
 
 use self::api::{
@@ -11,6 +11,7 @@ use crate::protocol::buffers::ByteBuffer;
 
 use api::ObjectId;
 use buffers::SharedBuffer;
+use color_eyre::owo_colors::OwoColorize;
 use log::{debug, error, info, trace, warn};
 use std::{
     borrow::BorrowMut,
@@ -137,19 +138,18 @@ impl WaylandClient {
         Ok(())
     }
 
-
-    pub fn get_shared_buffer(&mut self, buffer_id : usize) -> Option<&mut SharedBuffer> {
+    pub fn get_shared_buffer(
+        &mut self,
+        buffer_id: usize,
+    ) -> Option<&mut SharedBuffer> {
         if buffer_id >= self.buffers.len() {
-            return None
+            return None;
         }
 
         Some(&mut self.buffers[buffer_id])
     }
 
-    pub fn create_pool(
-        &mut self,
-        size: usize,
-    ) -> Result<(ObjectId, usize)> {
+    pub fn create_pool(&mut self, size: usize) -> Result<(ObjectId, usize)> {
         let shm_id = self.get_global_mapping(WaylandObject::Shm).unwrap();
         let pool_id = self.new_id(WaylandObject::ShmPool);
         let shared_buffer = SharedBuffer::alloc(size)?;
@@ -290,12 +290,13 @@ impl ReceiverThread {
         proto_state: Locked<ProtocolState>,
     ) -> Self {
         let proto_ids = Arc::clone(&ids);
+        let cb_stream = stream.try_clone().unwrap();
         Self {
             channel,
             stream,
             ids,
             buffer: ByteBuffer::new(1 << 12),
-            callbacks: AsyncCallBack::new(proto_state, proto_ids),
+            callbacks: AsyncCallBack::new(proto_state, proto_ids, cb_stream),
         }
     }
 
@@ -359,7 +360,7 @@ impl ReceiverThread {
                     WaylandClientError::NoMessage => {
                         warn!("Received no message waiting a few milliseconds");
                         thread::sleep(Duration::from_millis(100));
-                    },
+                    }
                     WaylandClientError::RandomError(err) => {
                         error!("Error processing a message {err:?}");
                     }
@@ -381,16 +382,19 @@ impl ReceiverThread {
 struct AsyncCallBack {
     proto_state: Locked<ProtocolState>,
     proto_ids: LockedProtocolIds,
+    stream: UnixStream,
 }
 
 impl AsyncCallBack {
     fn new(
         proto_state: Locked<ProtocolState>,
         proto_ids: LockedProtocolIds,
+        stream: UnixStream,
     ) -> Self {
         Self {
             proto_state,
             proto_ids,
+            stream,
         }
     }
 
@@ -413,6 +417,21 @@ impl AsyncCallBack {
             WaylandEvent::DisplayDelete(item) => {
                 warn!("Received delecting msg for {item}");
                 self.proto_ids.lock().unwrap().remove(&item);
+            }
+
+            // WaylandEvent::XdgSurfaceConfigure(value) => {
+            //     warn!("Received")
+            // }
+            WaylandEvent::XdgSurfaceConfigure(serial) => {
+                warn!("Received configure with serial = {serial}");
+                match wire_messages::make_request(
+                    &mut self.stream,
+                    msg.sender_id,
+                    WaylandRequest::XdgSurfaceAckConfigure(serial),
+                ) {
+                    Ok(_) => warn!("Configure-ack sent with success"),
+                    Err(err) => warn!("Error sending configure-ack {err:?}"),
+                };
             }
             _ => return Some(msg),
         }
