@@ -1,5 +1,5 @@
 use color_eyre::eyre::eyre;
-use log::debug;
+use log::{debug, trace};
 use std::io::Write;
 
 use super::api::WaylandRequest;
@@ -17,6 +17,7 @@ pub fn make_request(
     object_id: u32,
     request: WaylandRequest,
 ) -> color_eyre::Result<()> {
+    trace!("Serializing {:?} to {}", request, object_id);
     let mut buffer = Vec::new();
 
     let request_id = request.request_id();

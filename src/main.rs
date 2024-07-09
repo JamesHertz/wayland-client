@@ -131,8 +131,8 @@ fn main() -> color_eyre::Result<()> {
 
     client.load_interfaces()?;
 
-    info!("Waiting to see if any error will arrive!");
-    thread::sleep(Duration::from_secs(30));
+    // info!("Waiting to see if any error will arrive!");
+    // thread::sleep(Duration::from_secs(30));
 
     let messages = client.pull_messages()?;
     info!("Gotten messages {messages:?}");
@@ -142,12 +142,14 @@ fn main() -> color_eyre::Result<()> {
     let height : i32 = 1080;
     let stride : i32 = 4 * width;
     let window_size : i32 = 4 * height * stride;
-    let pool_size : i32 = 2 * window_size;
+    let pool_size   : i32 = 2 * window_size;
+    info!("Pool size : {}", pool_size);
 
     let (pool_id, mem_buffer_id) = client.create_pool(pool_size as usize)?;
     {
         let mem = client.get_shared_buffer(mem_buffer_id).unwrap();
         mem.data.as_mut().fill(0);
+        info!("Mem size {}", mem.data.len())
     }
 
     info!("Created pool {pool_id}");
