@@ -206,6 +206,7 @@ mod utils {
     }
 
     pub fn init_log() {
+        // TODO: ADD TIME TO LOG LINES
         if env::var_os("RUST_LOG").is_none() {
             unsafe {
                 env::set_var("RUST_LOG", "info");
