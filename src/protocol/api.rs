@@ -57,12 +57,38 @@ macro_rules! marshall_values {
     };
 }
 
-use super::parser::{self, Array,MsgArgType, MsgArgValue, Parser};
+use super::parser::{self, Array, MsgArgType, MsgArgValue, Parser};
 use color_eyre::eyre::eyre;
 use log::warn;
 use std::{io::Write, str::FromStr};
 
 pub type ObjectId = u32;
+
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum TopLevelState {
+    None = 0,
+    Maximized,
+    Fullscreen,
+    Resizing,
+    Activated,
+    TiledLeft,
+    TiledRight,
+    TiledTop,
+    TiledBottom,
+    Suspended,
+}
+
+impl TryFrom<u8> for TopLevelState {
+    type Error = color_eyre::Report;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if value >= Self::None as u8 && value <= Self::Suspended as u8 {
+            unsafe { Ok(std::mem::transmute::<u8, Self>(value)) }
+        } else {
+            Err(eyre!("Invalid TopLevelState {}", value))
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct WaylandEventMessage {
@@ -88,15 +114,14 @@ pub enum WaylandEvent {
     ShmFormat(u32),
     XdgSurfaceConfigure(u32),
     XdgTopLevelConfigure {
-        width  : u32,
-        height : u32,
-        states : Array,
-    }
-    // XdgSurfaceTopLevelConfigure {
-    //     width  : i32,
-    //     height : i32,
-    // }
-    // EventCapabities()
+        width: u32,
+        height: u32,
+        states: Vec<TopLevelState>,
+    }, // XdgSurfaceTopLevelConfigure {
+       //     width  : i32,
+       //     height : i32,
+       // }
+       // EventCapabities()
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
@@ -151,20 +176,52 @@ impl WaylandObject {
             (Self::Display | Self::CallBack | Self::Shm, _) => {
                 Err(eyre!("Invalid message {event_id} for {:?}", self))
             }
-            (Self::XdgTopLevel, 3)| (Self::Buffer, 0)  => {
+            (Self::XdgTopLevel, 3) | (Self::Buffer, 0) => {
                 warn!("Receiving event {event_id} for {self:?} ... Ignoring and emitting ShmFormat(0)");
-                Ok( WaylandEvent::ShmFormat(0) )
+                Ok(WaylandEvent::ShmFormat(0))
             }
-            (Self::XdgSurface, 0) => unmarshall_event!(buffer, XdgSurfaceConfigure(Uint32)),
+            (Self::XdgSurface, 0) => {
+                unmarshall_event!(buffer, XdgSurfaceConfigure(Uint32))
+            }
 
             (Self::XdgTopLevel, 0) => {
-                unmarshall_event!(buffer, XdgTopLevelConfigure {
-                    width  => Uint32,
-                    height => Uint32,
-                    states => Array,
+                // FIXME: I am a mess, fixme c:
+                let mut results = Parser::new(&[
+                    MsgArgType::Uint32,
+                    MsgArgType::Uint32,
+                    MsgArgType::Array,
+                ])
+                .parse(buffer)?;
+
+                let height = results.next().unwrap().into_u32();
+                let width = results.next().unwrap().into_u32();
+
+                let event_states = results
+                    .next()
+                    .unwrap()
+                    .into_array()
+                    .into_iter()
+                    .map(TopLevelState::try_from);
+
+                let mut states = Vec::new();
+                for state in event_states {
+                    states.push(state?);
+                }
+
+                Ok(WaylandEvent::XdgTopLevelConfigure {
+                    width,
+                    height,
+                    states,
                 })
+                // unmarshall_event!(buffer, XdgTopLevelConfigure {
+                //     width  => Uint32,
+                //     height => Uint32,
+                //     states => Array,
+                // })
             }
-            _ => Err(eyre!("Event {event_id} for {self:?} doesn't have handler"))
+            _ => {
+                Err(eyre!("Event {event_id} for {self:?} doesn't have handler"))
+            }
         }
     }
 
@@ -213,9 +270,9 @@ pub enum WaylandRequest {
         pixel_format: ShmPixelFormat,
     },
     SufaceAttach {
-        buffer_id : ObjectId,
-        x : u32,
-        y : u32
+        buffer_id: ObjectId,
+        x: u32,
+        y: u32,
     },
     SufaceCommit,
     XdgSurfaceGetTopLevel(ObjectId),
@@ -245,10 +302,9 @@ impl WaylandRequest {
         match self {
             Self::DisplaySync(value)
             | Self::DisplayGetRegistry(value)
-            | Self::CompositorCreateSurface(value) 
-            | Self::XdgSurfaceGetTopLevel(value) 
-            | Self::XdgSurfaceAckConfigure(value)
-            => {
+            | Self::CompositorCreateSurface(value)
+            | Self::XdgSurfaceGetTopLevel(value)
+            | Self::XdgSurfaceAckConfigure(value) => {
                 marshall_values!(buffer, Uint32(value))
             }
             Self::XdgWmGetSurface { new_id, surface } => {
@@ -268,7 +324,11 @@ impl WaylandRequest {
                     Uint32(new_id)
                 )
             }
-            Self::ShmCreatePool { pool_id, fd : _, size } => {
+            Self::ShmCreatePool {
+                pool_id,
+                fd: _,
+                size,
+            } => {
                 // u32 as i32 doesn't make any difference for marshalling
                 marshall_values!(
                     buffer,
@@ -294,14 +354,19 @@ impl WaylandRequest {
                     Int32(stride),
                     Uint32(pixel_format as u32)
                 )
-            },
+            }
             Self::SufaceAttach { buffer_id, x, y } => {
-                marshall_values!(buffer, Uint32(buffer_id), Uint32(x), Uint32(y))
-            },
+                marshall_values!(
+                    buffer,
+                    Uint32(buffer_id),
+                    Uint32(x),
+                    Uint32(y)
+                )
+            }
             Self::SufaceCommit => Ok(()),
             Self::XdgTopLevelSetTitle(title) => {
-               marshall_values!(buffer, String(title))
-            },
+                marshall_values!(buffer, String(title))
+            }
         }
     }
 }

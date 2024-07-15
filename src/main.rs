@@ -15,7 +15,7 @@ use log::info;
 use memmap::MmapOptions;
 // use utils::join_shared_memory;
 use wayland_client::protocol::{
-    api::{ShmPixelFormat, WaylandObject, WaylandRequest},
+    api::{ShmPixelFormat, WaylandObject, WaylandRequest, TopLevelState},
     WaylandClient,
 };
 
@@ -25,8 +25,19 @@ fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
     utils::init_log();
 
+	  // println!("value for Maximized {}",   TopLevelState::Maximized as u32);
+	  // println!("value for Fullscreen {}",  TopLevelState::Fullscreen as u32);
+	  // println!("value for Resizing {}",    TopLevelState::Resizing as u32);
+	  // println!("value for Activated {}",   TopLevelState::Activated as u32);
+	  // println!("value for TiledLeft {}",   TopLevelState::TiledLeft as u32);
+	  // println!("value for TiledRight {}",  TopLevelState::TiledRight as u32);
+	  // println!("value for TiledTop {}",    TopLevelState::TiledTop as u32);
+	  // println!("value for TiledBottom {}", TopLevelState::TiledBottom as u32);
+	  // println!("value for Suspended {}",   TopLevelState::Suspended as u32);
+	  //
+	  //     std::process::exit(0);
+    
     let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
-
     client.load_interfaces()?;
 
     // info!("Waiting to see if any error will arrive!");

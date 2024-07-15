@@ -3,7 +3,7 @@ use std::{io::Write, iter};
 use color_eyre::eyre::{eyre, Context};
 use log::debug;
 
-pub type Array = Vec<u8>;
+pub type Array = Vec<u32>;
 
 #[derive(Clone, Copy, Debug)]
 pub enum MsgArgType {
@@ -110,19 +110,22 @@ impl<'a> Parser<'a> {
                 MsgArgType::Array => {
                     let arr_size = value as usize;
 
-                    if buf.len() != arr_size {
+                    if buf.len() != arr_size  && buf.len() % 4 == 0{
                         return Err(eyre!(
                             "Array has {arr_size} elements but size in bytes is {}. Couldn't parse arg {i}.",
                             buf.len()
                         ));
                     }
 
-                    consumed += arr_size;
+                    // consumed += arr_size;
 
+                    todo!()
                     // consumed += arr_size * 4;
-                    MsgArgValue::Array(
-                        buf.into()
-                    )
+                    //
+                    // MsgArgValue::Array(
+                    //     buf.iter()
+                    //
+                    // )
                 }
             });
         }
