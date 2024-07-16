@@ -2,3 +2,4 @@
 -> Random & Useful Redit post - https://www.reddit.com/r/wayland/comments/4dzc9d/what_are_the_wayland_protocol_opcodes/
 -> Wayland docs - https://wayland.freedesktop.org/docs/html/apa.html
 -> Wayland docs 2.0 - https://wayland.app/protocols/wayland
+-> Cargo build script - https://doc.rust-lang.org/cargo/reference/build-scripts.html
