@@ -25,8 +25,8 @@ use log::info;
 fn main() -> Result<()> {
     utils::init_log();
 
-    let client = WaylandClient::connect(&utils::wayland_sockpath())?;
-    // client.load_interfaces()?;
+    let _client = WaylandClient::connect(&utils::wayland_sockpath())?;
+    info!("Initialization completed!");
     loop {}
 
     // info!("Waiting to see if any error will arrive!");

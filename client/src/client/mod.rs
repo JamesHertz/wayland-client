@@ -18,10 +18,7 @@ use std::{
 
 use crate::{
     error::{error_context, fallback_error, fatal_error, Error, Result},
-    protocol::{
-        base::*, EventParseResult, WaylandId, WaylandInterface, WaylandStream,
-        WireMessage, WlEvent, WlInterfaceId,
-    },
+    protocol::{base::*, *},
     wire_format::{ClientStream, WireMsgHeader},
 };
 
@@ -30,11 +27,137 @@ use log::{debug, error, info, trace};
 pub(super) type Locked<T> = Arc<Mutex<T>>;
 pub(super) type Shared<T> = Arc<RefCell<T>>;
 
+type WlEventMsg = (WaylandId, WlEvent);
+
 pub type WlEventId = WaylandId;
 pub type WlObjectId = WaylandId;
 type EventParseFunc =
     for<'a> fn(WlEventId, WlObjectId, &'a [u8]) -> EventParseResult<WlEvent>;
-type IdsMapping = HashMap<WaylandId, EventParseFunc>;
+
+pub struct WaylandClient {
+    globals: HashMap<WlInterfaceId, WaylandId>,
+    ids: Locked<WlIdManager>,
+    wl_stream: Rc<ClientStream>,
+    event_receiver: Receiver<WlEventMsg>,
+    wl_display: Option<WlDisplay>,
+}
+
+impl WaylandClient {
+    pub fn connect(socket_path: &str) -> Result<Self> {
+        let (event_sender, event_receiver) = mpsc::channel();
+        let socket = error_context!(
+            UnixStream::connect(dbg!(socket_path)),
+            "Failed to establish connection."
+        )?;
+
+        let object_ids = Arc::new(Mutex::new(WlIdManager::new()));
+        let mut client = Self {
+            event_receiver,
+            globals: HashMap::new(),
+            wl_stream: Rc::new(ClientStream::new(
+                socket.try_clone().expect("Unable to clone UnixStream"),
+            )),
+            ids: Arc::clone(&object_ids),
+            wl_display: None,
+        };
+
+        let display: WlDisplay = client.new_global();
+        assert!(display.get_object_id() == 1);
+        ReceiverThread::new(event_sender, socket, object_ids).start();
+
+        client.wl_display = Some(display);
+        client.initialize_client()?;
+
+        Ok(client)
+    }
+
+    fn initialize_client(&mut self) -> Result<()> {
+        let registry: WlRegistry = self.new_global();
+        self.wl_display().get_registry(registry.get_object_id())?;
+
+        let events = self.pull_events()?;
+        for ev in events {
+            match ev {
+                WlRegistryGlobal {
+                    name,
+                    interface,
+                    version,
+                } => {
+                    let object_id = match interface.as_str() {
+                        "wl_compositor" => self.new_object_id::<WlCompositor>(),
+                        "xdg_wm_base"   => self.new_object_id::<XdgWmBase>(),
+                        "wl_shm"        => self.new_object_id::<WlShm>(),
+                        other => continue,
+                    };
+
+                    registry.bind(name, interface, version, object_id)?;
+                }
+                other => panic!("Unexpected message {other:?}"),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_global<T: WaylandInterface>(&self) -> Option<T> {
+        self.globals
+            .get(&T::get_interface_id())
+            .map(|&id| self.build_wlobject(id))
+    }
+
+    pub fn new_object<T: WaylandInterface>(&mut self) -> T {
+        let object_id = self.ids.lock().unwrap().new_id::<T>();
+        self.build_wlobject(object_id)
+    }
+
+    pub fn delete_object(&mut self, object: impl WaylandInterface) {
+        self.ids.lock().unwrap().delete_id(object.get_object_id());
+    }
+
+    // helper functions
+    fn wl_display(&self) -> &WlDisplay {
+        self.wl_display.as_ref().unwrap()
+    }
+
+    #[inline]
+    fn new_object_id<T: WaylandInterface>(&mut self) -> WaylandId {
+        self.new_object::<T>().get_object_id()
+    }
+
+    #[inline]
+    fn build_wlobject<T: WaylandInterface>(&self, object_id: WaylandId) -> T {
+        T::build(object_id, self.wl_stream.clone())
+    }
+
+    fn new_global<T: WaylandInterface>(&mut self) -> T {
+        let object = self.new_object::<T>();
+        self.globals
+            .insert(T::get_interface_id(), object.get_object_id());
+        object
+    }
+
+    fn pull_events(&mut self) -> Result<Vec<WlEvent>> {
+        let mut events = Vec::new();
+        let callback: WlCallBack = self.new_object();
+
+        let display = self.wl_display();
+        display.sync(callback.get_object_id())?;
+
+        loop {
+            match self.event_receiver.recv().unwrap() {
+                (obj_id, WlCallBackDone(_))
+                    if obj_id == callback.get_object_id() =>
+                {
+                    break;
+                }
+                (_, event) => events.push(event),
+            }
+        }
+
+        Ok(events)
+    }
+
+}
 
 #[derive(Debug, Clone, Copy)]
 struct WlObjectInfo {
@@ -77,79 +200,19 @@ impl WlIdManager {
         object_id
     }
 
+    fn delete_id(&mut self, object_id: WaylandId) {
+        assert!(self.object_ids.remove(&object_id).is_some());
+    }
+
     fn get_object_info(&self, object_id: WaylandId) -> Option<WlObjectInfo> {
         self.object_ids.get(&object_id).copied()
     }
 }
 
-pub struct WaylandClient {
-    globals: HashMap<WlInterfaceId, WaylandId>,
-    ids: Locked<WlIdManager>,
-    wl_stream: Rc<ClientStream>,
-    event_receiver: Receiver<WlEvent>,
-}
-
-impl WaylandClient {
-    pub fn connect(socket_path: &str) -> Result<Self> {
-        let (event_sender, event_receiver) = mpsc::channel();
-        let socket = error_context!(
-            UnixStream::connect(dbg!(socket_path)),
-            "Failed to establish connection"
-        )?;
-
-        let object_ids = Arc::new(Mutex::new(WlIdManager::new()));
-        let mut client = Self {
-            event_receiver,
-            globals: HashMap::new(),
-            wl_stream: Rc::new(ClientStream::new(
-                socket.try_clone().expect("Unable to clone UnixStream"),
-            )),
-            ids: Arc::clone(&object_ids),
-        };
-
-        let display: WlDisplay = client.new_global();
-        assert!(display.get_object_id() == 1);
-        ReceiverThread::new(event_sender, socket, object_ids).start();
-
-        let registry: WlRegistry = client.new_global();
-        display.get_registry(registry.get_object_id())?;
-
-        // TODO: wait for all the messages
-
-        Ok(client)
-    }
-
-    pub fn get_global<T: WaylandInterface>(&self) -> Option<T> {
-        self.globals
-            .get(&T::get_interface_id())
-            .map(|&id| self.build_wlobject(id))
-    }
-
-    pub fn new_object<T: WaylandInterface>(&mut self) -> T {
-        let object_id = self.ids.lock().unwrap().new_id::<T>();
-        self.build_wlobject(object_id)
-    }
-
-    fn new_global<T: WaylandInterface>(&mut self) -> T {
-        let object = self.new_object::<T>();
-        self.globals
-            .insert(T::get_interface_id(), object.get_object_id());
-        object
-    }
-
-    fn build_wlobject<T: WaylandInterface>(&self, object_id: WaylandId) -> T {
-        T::build(object_id, self.wl_stream.clone())
-    }
-}
-
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-
 // struct SharedStream(Shared<UnixStream>);
 // unsafe impl Send for SharedStream {}
-
 struct ReceiverThread {
-    channel: Sender<WlEvent>,
+    channel: Sender<WlEventMsg>,
     stream: UnixStream,
     object_ids: Locked<WlIdManager>,
     buffer: ByteBuffer,
@@ -158,7 +221,7 @@ struct ReceiverThread {
 
 impl ReceiverThread {
     fn new(
-        channel: Sender<WlEvent>,
+        channel: Sender<WlEventMsg>,
         stream: UnixStream,
         object_ids: Locked<WlIdManager>,
     ) -> Self {
@@ -170,13 +233,6 @@ impl ReceiverThread {
         }
     }
 
-    //     fn read_stream_bytes(
-    //         &mut self,
-    //         size: usize,
-    //     ) -> CustomResult<Option<&[u8]>> {
-    //         Ok(self.buffer.read_bytes(size, &mut self.stream)?)
-    //     }
-    //
     fn get_object_info(&mut self, object_id: u32) -> Result<WlObjectInfo> {
         let ids = self.object_ids.lock().unwrap();
         ids.get_object_info(object_id)
@@ -190,7 +246,7 @@ impl ReceiverThread {
         self.buffer.read_bytes(size, &mut self.stream)
     }
 
-    fn wait_for_msg(&mut self) -> Result<WlEvent> {
+    fn wait_for_msg(&mut self) -> Result<WlEventMsg> {
         let header = WireMsgHeader::build(error_context!(
             self.read_bytes(WireMsgHeader::WIRE_SIZE),
             "Failed to read wire message header"
@@ -198,7 +254,8 @@ impl ReceiverThread {
 
         trace!(
             "Received a msg from {} with {} size",
-            header.object_id, header.length
+            header.object_id,
+            header.length
         );
         let obj_info = self.get_object_info(header.object_id)?;
 
@@ -208,17 +265,19 @@ impl ReceiverThread {
             "Failed to read message payload"
         )?;
 
-        error_context!(
+        let event = error_context!(
             (obj_info.event_parse_func)(
                 header.object_id,
                 header.method_id.into(),
                 payload
             ),
-            "Unable to parse event {} for object {}@{:?}",
+            "Unable to parse event {} for object {} @ {:?}",
             header.method_id,
             header.object_id,
             obj_info.interface_id
-        )
+        )?;
+
+        Ok((header.object_id, event))
     }
 
     fn start(mut self) {
@@ -233,6 +292,7 @@ impl ReceiverThread {
                 Err(err) => error!("Got error {err:#?} reading message!"),
                 Ok(msg) => {
                     // trace!("Shipping event {msg:#?}");
+                    // TODO: have handlers for errors and delections c:
                     self.channel
                         .send(msg)
                         .expect("Couldn't send event message over channel");

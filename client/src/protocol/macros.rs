@@ -20,7 +20,6 @@ macro_rules! declare_interface {
                 self.0.object_id
             }
 
-
             $($parse_event_body)*
         }
 
@@ -29,11 +28,11 @@ macro_rules! declare_interface {
     ($name : ident) => {
         declare_interface!(@base_skeleton $name, {
             fn parse_event(
-                _object_id: WaylandId,
+                object_id: WaylandId,
                 _event_id: WaylandId,
                 _payload: &[u8],
             ) -> crate::protocol::EventParseResult<WlEvent> {
-                todo!()
+                Err(crate::protocol::EventParseError::NoEvent(object_id))
             }
         });
     };

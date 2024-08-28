@@ -70,21 +70,23 @@ pub enum WlEvent {
         code: u32,
         message: String,
     },
-    WlDisplayDeleteId {
-        object: WaylandId,
-    },
-
+    WlDisplayDeleteId(WaylandId),
     WlRegistryGlobal {
         name: u32,
         interface: String,
         version: u32,
     },
+    WlCallBackDone(u32)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum WlInterfaceId {
     WlDisplay,
     WlRegistry,
+    WlCallBack,
+    WlCompositor,
+    XdgWmBase,
+    WlShm,
 }
 
 #[derive(Debug)]
