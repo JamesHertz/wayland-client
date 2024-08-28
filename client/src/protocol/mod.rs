@@ -19,7 +19,7 @@ pub type EventParseResult<T> = StdResult<T, EventParseError>;
 #[derive(Debug)]
 pub enum WireValue {
     Uint32(u32),
-    Int32(u32),
+    Int32(i32),
     Str(String),
     Array(Vec<u8>),
     FileDesc(i32),
@@ -88,6 +88,10 @@ pub enum WlInterfaceId {
     WlCompositor,
     XdgWmBase,
     WlShm,
+    WlSurface,
+    WlShmPool,
+    WlBuffer,
+    XdgSurface,
 }
 
 #[derive(Debug)]
@@ -109,5 +113,4 @@ impl fmt::Display for EventParseError {
         write!(f, "{self:?}")
     }
 }
-
 

@@ -1,3 +1,5 @@
+pub mod memory;
+
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -14,8 +16,6 @@ use std::{
     thread,
 };
 
-// mod wire_protocol;
-
 use crate::{
     error::{error_context, fallback_error, fatal_error, Error, Result},
     protocol::{base::*, *},
@@ -24,15 +24,17 @@ use crate::{
 
 use log::{debug, error, info, trace};
 
+use memory::SharedBuffer;
+
 pub(super) type Locked<T> = Arc<Mutex<T>>;
 pub(super) type Shared<T> = Arc<RefCell<T>>;
 
-type WlEventMsg = (WaylandId, WlEvent);
-
-pub type WlEventId = WaylandId;
-pub type WlObjectId = WaylandId;
+type WlEventId = WaylandId;
+type WlObjectId = WaylandId;
 type EventParseFunc =
     for<'a> fn(WlEventId, WlObjectId, &'a [u8]) -> EventParseResult<WlEvent>;
+
+type WlEventMsg = (WlObjectId, WlEvent);
 
 pub struct WaylandClient {
     globals: HashMap<WlInterfaceId, WaylandId>,
@@ -73,7 +75,8 @@ impl WaylandClient {
 
     fn initialize_client(&mut self) -> Result<()> {
         let registry: WlRegistry = self.new_global();
-        self.wl_display().get_registry(registry.get_object_id())?;
+        self.wl_display().get_registry(&registry)?;
+        // self.wl_display().get_registry(&registry.get_object_id())?;
 
         let events = self.pull_events()?;
         for ev in events {
@@ -84,12 +87,13 @@ impl WaylandClient {
                     version,
                 } => {
                     let object_id = match interface.as_str() {
-                        "wl_compositor" => self.new_object_id::<WlCompositor>(),
-                        "xdg_wm_base"   => self.new_object_id::<XdgWmBase>(),
-                        "wl_shm"        => self.new_object_id::<WlShm>(),
+                        "wl_compositor" => self.new_global_id::<WlCompositor>(),
+                        "xdg_wm_base" => self.new_global_id::<XdgWmBase>(),
+                        "wl_shm" => self.new_global_id::<WlShm>(),
                         other => continue,
                     };
 
+                    info!("Mapping {interface} to global");
                     registry.bind(name, interface, version, object_id)?;
                 }
                 other => panic!("Unexpected message {other:?}"),
@@ -97,6 +101,23 @@ impl WaylandClient {
         }
 
         Ok(())
+    }
+
+    pub fn create_pool(
+        &mut self,
+        size: i32,
+    ) -> Result<(WlShmPool, SharedBuffer)> {
+        assert!(size > 0);
+
+        // TODO: remove object if error occurrs
+        let shm: WlShm = self.get_global().expect("Failed to get global WlShm");
+        let pool: WlShmPool = self.new_global();
+        let buffer = SharedBuffer::alloc(size as usize)?;
+
+        shm.create_pool(&pool, buffer.as_file_descriptor(), size)?;
+
+        // TODO: find another way to save the buffer
+        Ok((pool, buffer))
     }
 
     pub fn get_global<T: WaylandInterface>(&self) -> Option<T> {
@@ -120,8 +141,8 @@ impl WaylandClient {
     }
 
     #[inline]
-    fn new_object_id<T: WaylandInterface>(&mut self) -> WaylandId {
-        self.new_object::<T>().get_object_id()
+    fn new_global_id<T: WaylandInterface>(&mut self) -> WaylandId {
+        self.new_global::<T>().get_object_id()
     }
 
     #[inline]
@@ -141,7 +162,8 @@ impl WaylandClient {
         let callback: WlCallBack = self.new_object();
 
         let display = self.wl_display();
-        display.sync(callback.get_object_id())?;
+        display.sync(&callback)?;
+        // display.sync(callback.get_object_id())?;
 
         loop {
             match self.event_receiver.recv().unwrap() {
@@ -156,7 +178,6 @@ impl WaylandClient {
 
         Ok(events)
     }
-
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,9 +261,6 @@ impl ReceiverThread {
     }
 
     fn read_bytes(&mut self, size: usize) -> Result<&[u8]> {
-        // TODO: why??
-        // let refcell: &RefCell<UnixStream> = self.stream.0.deref();
-        // let reader: &mut UnixStream = &mut refcell.borrow_mut();
         self.buffer.read_bytes(size, &mut self.stream)
     }
 
@@ -257,9 +275,8 @@ impl ReceiverThread {
             header.object_id,
             header.length
         );
-        let obj_info = self.get_object_info(header.object_id)?;
 
-        // 40 - 6 -> 34
+        let obj_info = self.get_object_info(header.object_id)?;
         let payload = error_context!(
             self.read_bytes(header.length as usize - WireMsgHeader::WIRE_SIZE),
             "Failed to read message payload"
@@ -300,47 +317,30 @@ impl ReceiverThread {
                     }
                 }
             }
-
-            // let msg = msg.unwrap();
-            // if let Some(msg) = self.callbacks.try_call(msg) {
-            //     trace!("Shipping +1 message");
-            //     self.channel
-            //         .send(msg)
-            //         .expect("Couldn't send event message over channel");
-            // }
         });
     }
 
-    fn try_call(&mut self, msg : WlEventMsg) -> Option<WlEventMsg> {
+    fn try_call(&mut self, msg: WlEventMsg) -> Option<WlEventMsg> {
         match &msg.1 {
             WlShmFormat(_) => trace!("Ignoring WlShmFormat message!"),
 
             // TODO: add interface type for each of the messages
-            WlDisplayError { object, message, .. } => {
-                error!("Error {message:?} for object {object}");
+            WlDisplayError {
+                object, message, ..
+            } => {
+                error!("Error {message:?} for object {object}.");
             }
 
             WlDisplayDeleteId(object_id) => {
-                debug!("Delecting object {object_id}");
-                self.object_ids
-                    .lock()
-                    .unwrap()
-                    .delete_id(*object_id);
+                debug!("Delecting object {object_id}.");
+                self.object_ids.lock().unwrap().delete_id(*object_id);
             }
 
-            other => {
-                return Some(msg)
-            }
-
+            other => return Some(msg),
         }
         None
     }
-
 }
-
-
-
-
 
 // struct AsyncCallBack {
 //     proto_state: Locked<ProtocolState>,

@@ -11,8 +11,7 @@ use std::{
     time::Duration,
 };
 
-
-use client::{Result, client::WaylandClient};
+use client::{client::WaylandClient, protocol::base::*, Result};
 
 use log::info;
 // use memmap::MmapOptions;
@@ -25,8 +24,40 @@ use log::info;
 fn main() -> Result<()> {
     utils::init_log();
 
-    let _client = WaylandClient::connect(&utils::wayland_sockpath())?;
+    let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
     info!("Initialization completed!");
+
+    let width = 1920;
+    let height = 1080;
+    let stride = 4 * width; // size of a line
+    let window = width * height * 4;
+    let (pool, _buffer) = client.create_pool(window * 2)?;
+    info!("BufferPool created!");
+
+    let buffer: WlBuffer = client.new_object();
+    pool.create_buffer(
+        &buffer,
+        0,
+        width,
+        height,
+        stride,
+        WlShmFormatValue::Argb8888,
+    )?;
+
+    let compositor: WlCompositor =
+        client.get_global().expect("Failed to get WlCompositor");
+
+    let surface : WlSurface = client.new_object();
+    compositor.create_surface(&surface)?;
+
+    let wm_base : XdgWmBase = client.get_global().expect("Failed to get XdgWmBase");
+
+    let xdg_surface : XdgSurface = client.new_object();
+    wm_base.get_xdg_surface(&xdg_surface, &surface)?;
+
+    // TODO: get a window on the screen
+    // TODO: do some clean up
+
     loop {}
 
     // info!("Waiting to see if any error will arrive!");
@@ -36,9 +67,9 @@ fn main() -> Result<()> {
     // info!("Gotten messages {messages:?}");
     //
     // // 1920x1080
-    // let width  : i32 = 1920; 
+    // let width  : i32 = 1920;
     // let height : i32 = 1080;
-    // // let width  : i32 = 960; 
+    // // let width  : i32 = 960;
     // // let height : i32 = 1030;
     // let stride : i32 = 4 * width;
     // let window_size : i32 = 4 * height * stride;
@@ -57,7 +88,7 @@ fn main() -> Result<()> {
     //
     // let buffer_id = client.new_id(WaylandObject::Buffer);
     // client.send_request(
-    //     pool_id, WaylandRequest::ShmPoolCreateBuffer { 
+    //     pool_id, WaylandRequest::ShmPoolCreateBuffer {
     //         buffer_id,  offset: 0, width, height, stride, pixel_format: ShmPixelFormat::Xrgb
     //     }
     // )?;
@@ -78,7 +109,7 @@ fn main() -> Result<()> {
     //
     //
     //     // client.send_request(
-    //     //     surfarce_id, 
+    //     //     surfarce_id,
     //     //     WaylandRequest::SufaceCommit
     //     // )?;
     //     // info!("Commited Surface");
@@ -92,8 +123,8 @@ fn main() -> Result<()> {
     //
     //     let xdg_suface_id = client.new_id(WaylandObject::XdgSurface);
     //     client.send_request(
-    //         xdg_wm_base_id, 
-    //         WaylandRequest::XdgWmGetSurface { 
+    //         xdg_wm_base_id,
+    //         WaylandRequest::XdgWmGetSurface {
     //             new_id: xdg_suface_id, surface: surface_id
     //         }
     //     )?;
@@ -122,7 +153,7 @@ fn main() -> Result<()> {
     // thread::sleep(Duration::from_secs(1));
     //
     // client.send_request(
-    //     surface_id, 
+    //     surface_id,
     //     WaylandRequest::SufaceCommit
     // )?;
     //
@@ -130,9 +161,9 @@ fn main() -> Result<()> {
     // thread::sleep(Duration::from_secs(1));
     //
     // client.send_request(
-    //     surface_id, 
-    //     WaylandRequest::SufaceAttach { 
-    //         buffer_id, x: 0, y : 0 
+    //     surface_id,
+    //     WaylandRequest::SufaceAttach {
+    //         buffer_id, x: 0, y : 0
     //     }
     // )?;
     //
@@ -145,7 +176,7 @@ fn main() -> Result<()> {
     // }
     //
     // client.send_request(
-    //     surface_id, 
+    //     surface_id,
     //     WaylandRequest::SufaceCommit
     // )?;
     //
@@ -160,7 +191,6 @@ fn main() -> Result<()> {
     // let shared_buffer = client.create_buffer(1024 * 1024 * 4)?;
 
     // shared_buffer.data.len();
-
 
     // let compositor   = client.get_global(WaylandObject::Compositor).unwrap();
     // let sufurface_id = client.new_id(WaylandObject::Surface);
@@ -203,5 +233,4 @@ mod utils {
         }
         pretty_env_logger::init();
     }
-
 }

@@ -1,5 +1,8 @@
 use super::*;
-use crate::{error::{self, fallback_error}, wire_format::parsing as parser};
+use crate::{
+    error::{self, fallback_error},
+    wire_format::parsing as parser,
+};
 use log::{debug, info, trace};
 
 declare_interface!(
@@ -15,7 +18,7 @@ declare_interface!(
             );
 
             debug!(
-                "{obj_id} @ {:?} <- display_error( {object}, {code}, {message:?}", 
+                "{obj_id} @ {:?} <- display_error( {object}, {code}, {message:?}",
                 WlDisplay::get_interface_id()
             );
             WlDisplayError{ object, code, message }
@@ -23,7 +26,7 @@ declare_interface!(
 
         1 => {
             let object = parser::parse_u32(&mut iter)?;
-            debug!( 
+            debug!(
                 "{obj_id} @ {:?} <- delete_id ( {object} )",
                 WlDisplay::get_interface_id()
             );
@@ -31,6 +34,37 @@ declare_interface!(
         }
     }
 );
+impl WlDisplay {
+    pub fn sync(&self, callback: &WlCallBack) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> sync( {} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            callback.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 0,
+            values: &[Uint32(callback.get_object_id())],
+        })
+    }
+
+    pub fn get_registry(&self, registry: &WlRegistry) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> get_registry( {} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            registry.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 1,
+            values: &[Uint32(registry.get_object_id())],
+        })
+    }
+}
 
 declare_interface!(
     WlRegistry,
@@ -44,7 +78,7 @@ declare_interface!(
                 parser::parse_u32(&mut iter)?
             );
 
-            debug!( 
+            debug!(
                 "{obj_id} @ {:?} <- global ( {name}, {interface:?}, {version} )",
                 WlDisplay::get_interface_id()
             );
@@ -53,105 +87,9 @@ declare_interface!(
         }
     }
 );
-
-declare_interface!(
-    WlCallBack,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
-        0 =>  {
-            let cb_data = parser::parse_u32(&mut iter)?;
-            debug!( 
-                "{obj_id} @ {:?} <- done ( {cb_data} )",
-                WlCallBack::get_interface_id()
-            );
-
-            WlCallBackDone( cb_data )
-        }
-    }
-);
-
-declare_interface!(WlCompositor);
-declare_interface!(XdgWmBase);
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum WlShmFormatValue { 
-    Argb8888 = 0, Xrgb8888 = 1, Other(u32)
-    // TODO: add all the remaining...
-    
-    // C8, Rgb332, Bgr233, Xrgb4444, Xbgr4444, Rgbx4444,
-    // Bgrx4444, Argb4444, Abgr4444, Rgba4444, Bgra4444, Xrgb1555, Xbgr1555,
-    // Rgbx5551, Bgrx5551, Argb1555, Abgr1555, Rgba5551, Bgra5551, Rgb565,
-    // Bgr565,   Rgb888,   Bgr888,   Xbgr8888, Rgbx8888, Bgrx8888, Abgr8888,
-    // Rgba8888, Bgra8888, Xrgb2101010, Xbgr2101010, Rgbx1010102, Bgrx1010102,
-    // Argb2101010, Abgr2101010, Rgba1010102, Bgra1010102, Yuyv, Yvyu, Uyvy,
-    // Vyuy, Ayuv, Nv12, Nv21, Nv16, Nv61, Yuv410, Yvu410, Yuv411, Yvu411,
-    // Yuv420, Yvu420, Yuv422, Yvu422, Yuv444, Yvu444, R8, R16, Rg88, Gr88,
-    // Rg1616, Gr1616, Xrgb16161616f, Xbgr16161616f, Argb16161616f, Abgr16161616f,
-    // Xyuv8888, Vuy888, Vuy101010, Y210, Y212, Y216, Y410, Y412, Y416,
-    // Xvyu2101010, Xvyu12_16161616, Xvyu16161616, Y0l0, X0l0, Y0l2, X0l2,
-    // Yuv420_8bit, Yuv420_10bit, Xrgb8888_a8, Xbgr8888_a8, Rgbx8888_a8,
-    // Bgrx8888_a8, Rgb888_a8, Bgr888_a8, Rgb565_a8, Bgr565_a8, Nv24, Nv42, P210,
-    // P010, P012, P016, Axbxgxrx106106106106, Nv15, Q410, Q401, Xrgb16161616,
-    // Xbgr16161616, Argb16161616, Abgr16161616, C1, C2, C4, D1, D2, D4, D8,
-    // R1, R2, R4, R10, R12, Avuy8888, Xvuy8888, P030 
-} 
-
-declare_interface!(
-    WlShm,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
-        0 => {
-            let format = match parser::parse_u32(&mut iter)? {
-                0 => WlShmFormatValue::Argb8888,
-                1 => WlShmFormatValue::Xrgb8888,
-                value => WlShmFormatValue::Other(value)
-            };
-
-            debug!( 
-                "{obj_id} @ {:?} <- format ( {format:?} )",
-                WlCallBack::get_interface_id()
-            );
-            WlShmFormat( format )
-        }
-    }
-);
-
-impl WlDisplay {
-    pub fn sync(&self, new_id: WaylandId) -> Result<usize> {
-        debug!(
-            "{} @ {:?} -> sync( {new_id} )",
-            self.get_object_id(),
-            Self::get_interface_id()
-        );
-
-        self.0.stream.send(WireMessage {
-            object_id: self.get_object_id(),
-            request_id: 0,
-            values: &[Uint32(new_id)],
-        })
-    }
-
-    pub fn get_registry(&self, new_id: WaylandId) -> Result<usize> {
-        debug!(
-            "{} @ {:?} -> get_registry( {new_id} )",
-            self.get_object_id(),
-            Self::get_interface_id()
-        );
-
-        self.0.stream.send(WireMessage {
-            object_id: self.get_object_id(),
-            request_id: 1,
-            values: &[Uint32(new_id)],
-        })
-    }
-}
-
 impl WlRegistry {
-
-    pub fn bind( &self, 
+    pub fn bind(
+        &self,
         name: u32,
         interface: String,
         version: u32,
@@ -167,10 +105,203 @@ impl WlRegistry {
             object_id: self.get_object_id(),
             request_id: 0,
             values: &[
-                Uint32(name), Str(interface), 
-                Uint32(version), Uint32(new_id)
+                Uint32(name),
+                Str(interface),
+                Uint32(version),
+                Uint32(new_id),
             ],
         })
     }
+}
 
+declare_interface!(
+    WlCallBack,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 =>  {
+            let cb_data = parser::parse_u32(&mut iter)?;
+            debug!(
+                "{obj_id} @ {:?} <- done ( {cb_data} )",
+                WlCallBack::get_interface_id()
+            );
+
+            WlCallBackDone( cb_data )
+        }
+    }
+);
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum WlShmFormatValue {
+    Argb8888 = 0,
+    Xrgb8888 = 1,
+    Other(u32), // TODO: add all the remaining...
+
+                // C8, Rgb332, Bgr233, Xrgb4444, Xbgr4444, Rgbx4444,
+                // Bgrx4444, Argb4444, Abgr4444, Rgba4444, Bgra4444, Xrgb1555, Xbgr1555,
+                // Rgbx5551, Bgrx5551, Argb1555, Abgr1555, Rgba5551, Bgra5551, Rgb565,
+                // Bgr565,   Rgb888,   Bgr888,   Xbgr8888, Rgbx8888, Bgrx8888, Abgr8888,
+                // Rgba8888, Bgra8888, Xrgb2101010, Xbgr2101010, Rgbx1010102, Bgrx1010102,
+                // Argb2101010, Abgr2101010, Rgba1010102, Bgra1010102, Yuyv, Yvyu, Uyvy,
+                // Vyuy, Ayuv, Nv12, Nv21, Nv16, Nv61, Yuv410, Yvu410, Yuv411, Yvu411,
+                // Yuv420, Yvu420, Yuv422, Yvu422, Yuv444, Yvu444, R8, R16, Rg88, Gr88,
+                // Rg1616, Gr1616, Xrgb16161616f, Xbgr16161616f, Argb16161616f, Abgr16161616f,
+                // Xyuv8888, Vuy888, Vuy101010, Y210, Y212, Y216, Y410, Y412, Y416,
+                // Xvyu2101010, Xvyu12_16161616, Xvyu16161616, Y0l0, X0l0, Y0l2, X0l2,
+                // Yuv420_8bit, Yuv420_10bit, Xrgb8888_a8, Xbgr8888_a8, Rgbx8888_a8,
+                // Bgrx8888_a8, Rgb888_a8, Bgr888_a8, Rgb565_a8, Bgr565_a8, Nv24, Nv42, P210,
+                // P010, P012, P016, Axbxgxrx106106106106, Nv15, Q410, Q401, Xrgb16161616,
+                // Xbgr16161616, Argb16161616, Abgr16161616, C1, C2, C4, D1, D2, D4, D8,
+                // R1, R2, R4, R10, R12, Avuy8888, Xvuy8888, P030
+}
+
+impl WlShmFormatValue {
+    fn into_u32(self) -> u32 {
+        match self {
+            WlShmFormatValue::Argb8888 => 0,
+            WlShmFormatValue::Xrgb8888 => 1,
+            WlShmFormatValue::Other(value) => value,
+        }
+    }
+}
+// impl Into<u32> for WlShmFormatValue {
+//
+//     fn into(value : WlShmFormatValue) -> u32 {
+//         match value {
+//             WlShmFormatValue::Argb8888 | WlShmFormatValue::Xrgb8888 => value as u32,
+//
+//         }
+//
+//     }
+//
+// }
+
+declare_interface!(
+    WlShm,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 => {
+            let format = match parser::parse_u32(&mut iter)? {
+                0 => WlShmFormatValue::Argb8888,
+                1 => WlShmFormatValue::Xrgb8888,
+                value => WlShmFormatValue::Other(value)
+            };
+
+            debug!(
+                "{obj_id} @ {:?} <- format ( {format:?} )",
+                WlCallBack::get_interface_id()
+            );
+            WlShmFormat( format )
+        }
+    }
+);
+impl WlShm {
+    pub fn create_pool(
+        &self,
+        pool: &WlShmPool,
+        file_descriptor: i32,
+        size: i32,
+    ) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> create_pool ( {}, {file_descriptor}, {size} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            pool.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 0,
+            values: &[
+                Uint32(pool.get_object_id()),
+                FileDesc(file_descriptor),
+                Int32(size),
+            ],
+        })
+    }
+}
+
+declare_interface!(WlCompositor);
+impl WlCompositor {
+    pub fn create_surface(&self, surface: &WlSurface) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> create_surface ( {} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            surface.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 0,
+            values: &[Uint32(surface.get_object_id())],
+        })
+    }
+}
+
+declare_interface!(WlShmPool);
+impl WlShmPool {
+    pub fn create_buffer(
+        &self,
+        buffer: &WlBuffer,
+        offset: i32,
+        width: i32,
+        height: i32,
+        stride: i32,
+        format: WlShmFormatValue,
+    ) -> Result<usize> {
+        let format = format.into_u32();
+
+        debug!(
+            "{} @ {:?} -> create_buffer ( {}, {offset}, {width}, {height}, {stride}, {format} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            buffer.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 0,
+            values: &[
+                Uint32(buffer.get_object_id()),
+                Int32(offset),
+                Int32(width),
+                Int32(height),
+                Int32(stride),
+                Uint32(format),
+            ],
+        })
+    }
+}
+
+declare_interface!(WlBuffer);
+declare_interface!(XdgSurface);
+declare_interface!(WlSurface);
+
+declare_interface!(XdgWmBase);
+
+impl XdgWmBase {
+    pub fn get_xdg_surface(
+        &self,
+        new_surface: &XdgSurface,
+        created_surface: &WlSurface,
+    ) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> create_surface( {}, {} )",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            new_surface.get_object_id(),
+            created_surface.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 2,
+            values: &[
+                Uint32(new_surface.get_object_id()),
+                Uint32(created_surface.get_object_id()),
+            ],
+        })
+    }
 }

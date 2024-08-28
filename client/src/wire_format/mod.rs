@@ -5,8 +5,13 @@ use crate::{
     Error, Result,
 };
 use std::{
-    cell::RefCell, io::Write, iter::Iterator, ops::Deref,
-    os::unix::net::UnixStream, str, sync::Arc,
+    cell::RefCell,
+    io::{IoSlice, Write},
+    iter::Iterator,
+    ops::Deref,
+    os::unix::net::{SocketAncillary, UnixStream},
+    str,
+    sync::Arc,
 };
 
 use log::debug;
@@ -45,10 +50,12 @@ impl ClientStream {
 impl WaylandStream for ClientStream {
     fn send(&self, msg: WireMessage<'_>) -> Result<usize> {
         // debug!("Sending message {msg:#?}");
-        let mut buffer = Vec::with_capacity(512);
+        let mut buffer = Vec::with_capacity(128);
 
         write_u32(&mut buffer, msg.object_id);
         write_u32(&mut buffer, 0); // will be filled in the end
+
+        let mut file_desc: Option<i32> = None;
 
         for value in msg.values {
             match value {
@@ -68,8 +75,11 @@ impl WaylandStream for ClientStream {
                         buffer.push(0u8);
                     }
                 }
+                FileDesc(fd) => {
+                    assert!(file_desc.is_none());
+                    file_desc = Some(*fd);
+                }
                 // Array(Vec<u8>),
-                // FileDesc(i32),
                 other => {
                     todo!("Implement serialization for {other:?}")
                 }
@@ -88,12 +98,22 @@ impl WaylandStream for ClientStream {
         let bytes = size_and_event_id.to_ne_bytes();
         buffer[4..8].copy_from_slice(&bytes);
 
-        // let refcell: &RefCell<UnixStream> = self.0.deref();
-        // let socket : &mut UnixStream = &mut refcell.borrow_mut();
-        self.0
-            .borrow_mut()
-            .write(&buffer)
-            .map_err(Error::IoError)
+        let result = if let Some(fd) = file_desc {
+            // 32 is s total random number, I think I only need 4 but I am not sure
+            // TODO: do research on this ...
+            let mut ancillary_buffer = [0; 32]; 
+            let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
+            ancillary.add_fds(&[fd][..]);
+
+            self.0.borrow_mut().send_vectored_with_ancillary(
+                &[IoSlice::new(&buffer)][..],
+                &mut ancillary,
+            )
+        } else {
+            self.0.borrow_mut().write(&buffer)
+        };
+
+        result.map_err(Error::IoError)
     }
 }
 
