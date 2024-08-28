@@ -1,56 +1,62 @@
 use super::*;
-use crate::Result;
-use log::info;
-
-
-
-macro_rules! declare_interface {
-    ($name : ident, $( $parse_event : tt)* ) => {
-        pub struct $name(WlObjectMetaData);
-
-        impl WaylandInterface for $name {
-            fn get_interface_id() -> WlInterfaceId {
-                WlInterfaceId::$name
-            }
-
-            fn build(object_id: u32, stream: Rc<dyn WaylandStream>) -> Self {
-                Self(WlObjectMetaData { object_id, stream })
-            }
-
-            fn get_object_id(&self) -> WaylandId {
-                self.0.object_id
-            }
-
-            $($parse_event)*
-        }
-
-    }
-}
+// use crate::Result;
+use crate::{error::fallback_error, wire_format::parsing as parser};
+use log::{debug, info, trace};
 
 declare_interface!(
-    WlDisplay, 
-    fn parse_event(
-        object_id : WaylandId,
-        event_id: WaylandId,
-        _payload: &[u8],
-    ) -> Option<WlEvent> {
-        info!("Received message {event_id} for object {object_id}@{:?}", Self::get_interface_id());
-        None
+    WlDisplay,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 => {
+            let (object, code, message) = (
+                parser::parse_u32(&mut iter)?,
+                parser::parse_u32(&mut iter)?,
+                parser::parse_str(&mut iter)?
+            );
+
+            debug!(
+                "{obj_id} @ {:?} <- display_error( {object}, {code}, {message:?}", 
+                WlDisplay::get_interface_id()
+            );
+            WlDisplayError{ object, code, message }
+        },
+
+        1 => {
+            let object = parser::parse_u32(&mut iter)?;
+            debug!( 
+                "{obj_id} @ {:?} <- delete_id ( {object} )",
+                WlDisplay::get_interface_id()
+            );
+            WlDisplayDeleteId { object }
+        }
     }
 );
 
 impl WlDisplay {
     pub fn sync(&self, new_id: WaylandId) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> sync( {new_id} )",
+            self.get_object_id(),
+            Self::get_interface_id()
+        );
+
         self.0.stream.send(WireMessage {
-            object_id: self.0.object_id,
+            object_id: self.get_object_id(),
             request_id: 0,
             values: &[Uint32(new_id)],
         })
     }
 
-    pub fn get_registry(&self, new_id : WaylandId) -> Result<usize> {
+    pub fn get_registry(&self, new_id: WaylandId) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> get_registry( {new_id} )",
+            self.get_object_id(),
+            Self::get_interface_id()
+        );
+
         self.0.stream.send(WireMessage {
-            object_id: self.0.object_id,
+            object_id: self.get_object_id(),
             request_id: 1,
             values: &[Uint32(new_id)],
         })
@@ -58,13 +64,23 @@ impl WlDisplay {
 }
 
 declare_interface!(
-    WlRegistry, 
-    fn parse_event(
-        object_id : WaylandId,
-        event_id: WaylandId,
-        _payload: &[u8],
-    ) -> Option<WlEvent> {
-        info!("Received message {event_id} for object {object_id}@{:?}", Self::get_interface_id());
-        None
+    WlRegistry,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 => {
+            let (name, interface, version) = (
+                parser::parse_u32(&mut iter)?,
+                parser::parse_str(&mut iter)?,
+                parser::parse_u32(&mut iter)?
+            );
+
+            debug!( 
+                "{obj_id} @ {:?} <- global ( {name}, {interface:?}, {version} )",
+                WlDisplay::get_interface_id()
+            );
+
+            WlRegistryGlobal { name, interface, version }
+        }
     }
 );

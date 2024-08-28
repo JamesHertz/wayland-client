@@ -1,11 +1,11 @@
 use std::{
-    process,
     cell::RefCell,
     collections::HashMap,
     io::{Read, Write},
     iter,
     ops::Deref,
     os::unix::net::UnixStream,
+    process,
     rc::Rc,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -14,29 +14,26 @@ use std::{
     thread,
 };
 
-mod wire_protocol;
+// mod wire_protocol;
 
 use crate::{
     error::{error_context, fallback_error, fatal_error, Error, Result},
     protocol::{
-        base::*, WaylandId, WaylandInterface, WaylandStream,
+        base::*, EventParseResult, WaylandId, WaylandInterface, WaylandStream,
         WireMessage, WlEvent, WlInterfaceId,
     },
-    // wire_message::WireMsgHeader,
+    wire_format::{ClientStream, WireMsgHeader},
 };
-
-use wire_protocol::{WireMsgHeader, ClientStream};
 
 use log::{debug, error, info, trace};
 
-
-pub (self) type Locked<T> = Arc<Mutex<T>>;
-pub (self) type Shared<T> = Arc<RefCell<T>>;
+pub(super) type Locked<T> = Arc<Mutex<T>>;
+pub(super) type Shared<T> = Arc<RefCell<T>>;
 
 pub type WlEventId = WaylandId;
 pub type WlObjectId = WaylandId;
 type EventParseFunc =
-    for<'a> fn(WlEventId, WlObjectId, &'a [u8]) -> Option<WlEvent>;
+    for<'a> fn(WlEventId, WlObjectId, &'a [u8]) -> EventParseResult<WlEvent>;
 type IdsMapping = HashMap<WaylandId, EventParseFunc>;
 
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +42,7 @@ struct WlObjectInfo {
     interface_id: WlInterfaceId,
 }
 
+// TODO: implement this (https://wayland-book.com/protocol-design/wire-protocol.html#object-ids)
 struct WlIdManager {
     object_ids: HashMap<WaylandId, WlObjectInfo>,
     id_count: u32,
@@ -61,8 +59,8 @@ impl WlIdManager {
     fn new_id<T: WaylandInterface>(&mut self) -> WaylandId {
         assert!(self.id_count < WaylandId::MAX);
 
-        let object_id = self.id_count;
         self.id_count += 1;
+        let object_id = self.id_count;
 
         assert!(
             self.object_ids
@@ -94,24 +92,26 @@ pub struct WaylandClient {
 impl WaylandClient {
     pub fn connect(socket_path: &str) -> Result<Self> {
         let (event_sender, event_receiver) = mpsc::channel();
-        let socket = Arc::new(RefCell::new(error_context!(
-            UnixStream::connect(socket_path),
+        let socket = error_context!(
+            UnixStream::connect(dbg!(socket_path)),
             "Failed to establish connection"
-        )?));
+        )?;
 
         let object_ids = Arc::new(Mutex::new(WlIdManager::new()));
         let mut client = Self {
             event_receiver,
             globals: HashMap::new(),
-            wl_stream: Rc::new(ClientStream::new(Arc::clone(&socket))),
+            wl_stream: Rc::new(ClientStream::new(
+                socket.try_clone().expect("Unable to clone UnixStream"),
+            )),
             ids: Arc::clone(&object_ids),
         };
 
-        let display : WlDisplay = client.new_global();
-        assert!(display.get_object_id() == 0);
+        let display: WlDisplay = client.new_global();
+        assert!(display.get_object_id() == 1);
         ReceiverThread::new(event_sender, socket, object_ids).start();
 
-        let registry : WlRegistry = client.new_global();
+        let registry: WlRegistry = client.new_global();
         display.get_registry(registry.get_object_id())?;
 
         // TODO: wait for all the messages
@@ -142,19 +142,15 @@ impl WaylandClient {
     }
 }
 
-
-
-
-
 // -------------------------------------------------------------
 // -------------------------------------------------------------
 
-struct SharedStream(Shared<UnixStream>);
-unsafe impl Send for SharedStream {}
+// struct SharedStream(Shared<UnixStream>);
+// unsafe impl Send for SharedStream {}
 
 struct ReceiverThread {
     channel: Sender<WlEvent>,
-    stream: SharedStream,
+    stream: UnixStream,
     object_ids: Locked<WlIdManager>,
     buffer: ByteBuffer,
     // callbacks: AsyncCallBack,
@@ -163,13 +159,13 @@ struct ReceiverThread {
 impl ReceiverThread {
     fn new(
         channel: Sender<WlEvent>,
-        stream: Shared<UnixStream>,
+        stream: UnixStream,
         object_ids: Locked<WlIdManager>,
     ) -> Self {
         Self {
             channel,
             object_ids,
-            stream: SharedStream(stream),
+            stream,
             buffer: ByteBuffer::new(4 * 1024),
         }
     }
@@ -189,9 +185,9 @@ impl ReceiverThread {
 
     fn read_bytes(&mut self, size: usize) -> Result<&[u8]> {
         // TODO: why??
-        let refcell: &RefCell<UnixStream> = self.stream.0.deref();
-        let reader: &mut UnixStream = &mut refcell.borrow_mut();
-        self.buffer.read_bytes(size, reader)
+        // let refcell: &RefCell<UnixStream> = self.stream.0.deref();
+        // let reader: &mut UnixStream = &mut refcell.borrow_mut();
+        self.buffer.read_bytes(size, &mut self.stream)
     }
 
     fn wait_for_msg(&mut self) -> Result<WlEvent> {
@@ -200,25 +196,29 @@ impl ReceiverThread {
             "Failed to read wire message header"
         )?);
 
-        debug!(
+        trace!(
             "Received a msg from {} with {} size",
             header.object_id, header.length
         );
         let obj_info = self.get_object_info(header.object_id)?;
 
+        // 40 - 6 -> 34
         let payload = error_context!(
             self.read_bytes(header.length as usize - WireMsgHeader::WIRE_SIZE),
             "Failed to read message payload"
         )?;
 
-        (obj_info
-            .event_parse_func)(header.object_id, header.method_id.into(), payload)
-            .ok_or(fallback_error!(
-                "Unable to parse event {} for object {}@{:?}",
-                header.method_id,
+        error_context!(
+            (obj_info.event_parse_func)(
                 header.object_id,
-                obj_info.interface_id
-            ))
+                header.method_id.into(),
+                payload
+            ),
+            "Unable to parse event {} for object {}@{:?}",
+            header.method_id,
+            header.object_id,
+            obj_info.interface_id
+        )
     }
 
     fn start(mut self) {
@@ -226,13 +226,13 @@ impl ReceiverThread {
         thread::spawn(move || loop {
             // TODO: fix this later
             match self.wait_for_msg() {
-                Err(err) if err.is_fatal() => { 
+                Err(err) if err.is_fatal() => {
                     error!("Fatal error: {err:#?}");
                     process::exit(1)
                 }
                 Err(err) => error!("Got error {err:#?} reading message!"),
                 Ok(msg) => {
-                    trace!("Shipping +1 message");
+                    // trace!("Shipping event {msg:#?}");
                     self.channel
                         .send(msg)
                         .expect("Couldn't send event message over channel");

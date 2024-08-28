@@ -1,16 +1,20 @@
-// use self::WireValue::*;
-pub mod base;
+use crate::{error, wire_format::parsing, Result};
+use std::{fmt, rc::Rc, result::Result as StdResult};
 
-use std::rc::Rc;
-use std::fmt;
-use crate::Result;
+pub mod base;
+mod macros;
 
 #[allow(unused_imports)]
 pub use self::WireValue::*;
 
+#[allow(unused_imports)]
+pub use self::WlEvent::*;
+
+#[allow(unused_imports)]
+use macros::declare_interface;
+
 pub type WaylandId = u32;
-// pub type WlEventId  = WaylandId;
-// pub type EventParser = for<'a> fn(WaylandId, WlEventId, &'a [u8]) -> Result<WlEvent>;
+pub type EventParseResult<T> = StdResult<T, EventParseError>;
 
 #[derive(Debug)]
 pub enum WireValue {
@@ -37,7 +41,11 @@ pub trait WaylandStream {
 pub trait WaylandInterface {
     fn get_interface_id() -> WlInterfaceId;
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
-    fn parse_event(object_id : WaylandId, event_id: WaylandId, payload: &[u8]) -> Option<WlEvent>;
+    fn parse_event(
+        object_id: WaylandId,
+        event_id: WaylandId,
+        payload: &[u8],
+    ) -> EventParseResult<WlEvent>;
     fn get_object_id(&self) -> WaylandId;
 }
 
@@ -46,38 +54,57 @@ pub struct WlObjectMetaData {
     stream: Rc<dyn WaylandStream>,
 }
 
-impl fmt::Debug for WlObjectMetaData  {
+impl fmt::Debug for WlObjectMetaData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-         f.debug_struct("WlObjectMetaData")
-          .field("object_id", &self.object_id)
-          .finish()
+        f.debug_struct("WlObjectMetaData")
+            .field("object_id", &self.object_id)
+            .finish()
     }
 }
 
 // #[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum WlEvent {
-    WlDisplayError    { object : WaylandId, code : u32, message : String },
-    WlDisplayDeleteId { object : WaylandId },
+    WlDisplayError {
+        object: WaylandId,
+        code: u32,
+        message: String,
+    },
+    WlDisplayDeleteId {
+        object: WaylandId,
+    },
 
-    WlRegistryGlobal { name: u32, interface: String, version: u32 }
+    WlRegistryGlobal {
+        name: u32,
+        interface: String,
+        version: u32,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum WlInterfaceId {
     WlDisplay,
-    WlRegistry
+    WlRegistry,
 }
 
-// impl Into<EventParser> for WlInterfaceId {
-//     fn into(self) -> EventParser {
-//         match self {
-//             Self::WlDisplay => base::WlDisplay::parse_event
-//         }
-//     }
-// }
+#[derive(Debug)]
+pub enum EventParseError {
+    NoEvent(WaylandId),
+    ParsingError(error::Error),
+}
 
+impl From<error::Error> for EventParseError {
+    fn from(value: error::Error) -> Self {
+        EventParseError::ParsingError(value)
+    }
+}
 
-
-
+impl fmt::Display for EventParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> StdResult<(), fmt::Error> {
+        // TODO: implement Display for error::Error so that this can be more beautiful
+        // TODO: implment display for this
+        write!(f, "{self:?}")
+    }
+}
 
 

@@ -22,15 +22,11 @@ use log::info;
 //     WaylandClient,
 // };
 
-const SOCK_FILE: &str = "test.sock";
-// notes: [1, 0XFEFFFFFF]
 fn main() -> Result<()> {
     utils::init_log();
 
-    info!("Hello, world");
-    let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
+    let client = WaylandClient::connect(&utils::wayland_sockpath())?;
     // client.load_interfaces()?;
-    //
     loop {}
 
     // info!("Waiting to see if any error will arrive!");

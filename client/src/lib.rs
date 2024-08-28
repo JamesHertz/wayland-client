@@ -1,9 +1,14 @@
-#![feature(unix_socket_ancillary_data, min_specialization)]
+#![feature(
+    unix_socket_ancillary_data,
+    min_specialization,
+    iter_next_chunk,
+    iter_advance_by
+)]
 // #![feature(specialization)]
-pub mod protocol;
-pub mod error;
 pub mod client;
-// mod wire_message;
+pub mod error;
+pub mod protocol;
+mod wire_format;
 
-pub use error::{Result, Error};
-pub use protocol::{WaylandId};
+pub use error::{Error, Result};
+pub use protocol::WaylandId;
