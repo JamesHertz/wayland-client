@@ -79,8 +79,7 @@
 //       <arg name="id" type="uint" summary="deleted object ID"/>
 //     </event>
 //   </interface>
-  
-  
+
 //   <interface name="wl_registry" version="1">
 //     <description summary="global registry object">
 //       The singleton global registry object.  The server has a number of
@@ -145,79 +144,137 @@
 //   </interface>
 //
 
-use std::cell::RefCell;
+use self::WireValue::*;
+use std::rc::Rc;
 
-type NewId    = u32;
-type ObjectId = u32;
+// type NewId = u32;
+type WaylandId = u32;
 type Result<T> = std::result::Result<T, std::io::Error>;
 
+#[derive(Debug)]
 enum WireValue {
     Uint32(u32),
     Int32(u32),
-    String(String),
-    Array(Vec<u8>)
+    Str(String),
+    Array(Vec<u8>),
 }
 
-struct WireMessage {
-    object_id : ObjectId,
-    values    : Vec<WireValue>,
+#[derive(Debug)]
+struct WireMessage<'a> {
+    interface_id: WlInterfaceId,
+    object_id: WaylandId,
+    request_id: WaylandId,
+    values: &'a [WireValue],
+}
+
+// Implementation of this trait are recommended to use interior mutability
+// (https://doc.rust-lang.org/reference/interior-mutability.html)
+trait WaylandStream {
+    fn send(&self, msg: WireMessage) -> Result<usize>;
+}
+
+trait WaylandInterface {
+    fn get_interface_id() -> WlInterfaceId;
+    // where Self: Sized;
+    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
+    // where Self: Sized;
+    fn get_object_id(&self) -> WaylandId;
+    fn get_event(&self, event_id: WaylandId, payload: &[u8]) -> Result<WlEvent>;
+}
+
+struct WlObjectMetaData {
+    object_id: WaylandId,
+    stream: Rc<dyn WaylandStream>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 enum WlInterfaceId {
     WlDisplay,
-    WlRegistry
+    // WlRegistry
 }
 
-trait WaylandStream {
-    fn send(&mut self, msg : WireMessage) -> Result<usize>;
-}
-
-trait WaylandInterface<'a> {
-    fn get_id() -> WlInterfaceId;
-    fn build(object_id: u32, stream : &'a RefCell<dyn WaylandStream>) -> Self;
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum WlRequest {
-    Sync(NewId),
-    GetRegistry(NewId)
-}
-
-
+// #[derive(Debug, PartialEq, Eq)]
 enum WlEvent {
-    WlDisplayError { object : ObjectId, code : u32, message : String }
+    // WlDisplayError { object : WaylandId, code : u32, message : String }
 }
 
-struct WlDisplay<'a> {
-    object_id : ObjectId,
-    stream    : &'a RefCell<dyn WaylandStream>
-    // stream    : Rc<dyn WaylandStream>
-}
+struct WlDisplay(WlObjectMetaData);
 
-impl WlDisplay<'_> {
-    fn sync(&mut self, new_id : ObjectId) -> Result<usize> {
-        self.stream.borrow_mut().send(WireMessage {  
-            object_id : self.object_id,
-            values: vec![WireValue::Uint32(new_id)]
+impl WlDisplay {
+    fn sync(&self, new_id: WaylandId) -> Result<usize> {
+        self.0.stream.send(WireMessage {
+            interface_id: Self::get_interface_id(),
+            object_id: self.0.object_id,
+            request_id: 1,
+            values: &[Uint32(new_id)],
         })
     }
 }
 
-impl <'a> WaylandInterface<'a> for WlDisplay<'a> {
-    fn get_id() -> WlInterfaceId {
+impl WaylandInterface for WlDisplay {
+    fn get_interface_id() -> WlInterfaceId {
         WlInterfaceId::WlDisplay
     }
 
-    fn build (object_id: u32, stream : &'a RefCell<dyn WaylandStream>) -> Self {
-        Self {
-            object_id,
-            stream
-        }
+    fn build(object_id: u32, stream: Rc<dyn WaylandStream>) -> Self {
+        Self(WlObjectMetaData { object_id, stream })
+    }
+
+    fn get_object_id(&self) -> WaylandId {
+        self.0.object_id
+    }
+
+    fn get_event(
+        &self,
+        _event_id: WaylandId,
+        _payload: &[u8],
+    ) -> Result<WlEvent> {
+        todo!()
     }
 }
-
-
-fn main() {
-    println!("Hello, world!");
+//
+// struct JockingStream(RefCell<u32>);
+// impl WaylandStream for JockingStream {
+//     fn send(&self, msg : WireMessage) -> Result<usize> {
+//         println!("Received yet another message {msg:?}");
+//         let mut value = self.0.borrow_mut();
+//         *value += 1;
+//         Ok(0)
+//     }
+// }
+//
+// impl JockingStream {
+//     fn new() -> Self {
+//         Self (RefCell::new(0))
+//     }
+//
+//     fn current_value(&self) -> u32 {
+//         *self.0.borrow()
+//     }
+// }
+//
+//
+// struct Client(Rc<JockingStream>);
+// impl Client {
+//
+//     fn get_global <T: WaylandInterface>(&self) -> T {
+//         T::build(0, self.0.clone())
+//     }
+// }
+//
+// to handle events use this later: https://github.com/Robbepop/enum-tag
+fn main() -> Result<()> {
+    // let client = Client(
+    //     Rc::new(JockingStream::new())
+    // );
+    //
+    // let display : WlDisplay = client.get_global();
+    // // display.get_object_id
+    // // display.sync(10)?;
+    // // display.sync(10)?;
+    // // display.sync(10)?;
+    //
+    // println!("value {}", client.0.current_value());
+    //
+    Ok(())
 }

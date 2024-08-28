@@ -184,41 +184,41 @@ impl WaylandObject {
                 unmarshall_event!(buffer, XdgSurfaceConfigure(Uint32))
             }
 
-            (Self::XdgTopLevel, 0) => {
-                // FIXME: I am a mess, fixme c:
-                let mut results = Parser::new(&[
-                    MsgArgType::Uint32,
-                    MsgArgType::Uint32,
-                    MsgArgType::Array,
-                ])
-                .parse(buffer)?;
-
-                let height = results.next().unwrap().into_u32();
-                let width = results.next().unwrap().into_u32();
-
-                let event_states = results
-                    .next()
-                    .unwrap()
-                    .into_array()
-                    .into_iter()
-                    .map(TopLevelState::try_from);
-
-                let mut states = Vec::new();
-                for state in event_states {
-                    states.push(state?);
-                }
-
-                Ok(WaylandEvent::XdgTopLevelConfigure {
-                    width,
-                    height,
-                    states,
-                })
-                // unmarshall_event!(buffer, XdgTopLevelConfigure {
-                //     width  => Uint32,
-                //     height => Uint32,
-                //     states => Array,
-                // })
-            }
+            // (Self::XdgTopLevel, 0) => {
+            //     // FIXME: I am a mess, fixme c:
+            //     let mut results = Parser::new(&[
+            //         MsgArgType::Uint32,
+            //         MsgArgType::Uint32,
+            //         MsgArgType::Array,
+            //     ])
+            //     .parse(buffer)?;
+            //
+            //     let height = results.next().unwrap().into_u32();
+            //     let width = results.next().unwrap().into_u32();
+            //
+            //     let event_states = results
+            //         .next()
+            //         .unwrap()
+            //         .into_array()
+            //         .into_iter()
+            //         .map(TopLevelState::try_from);
+            //
+            //     let mut states = Vec::new();
+            //     for state in event_states {
+            //         states.push(state?);
+            //     }
+            //
+            //     Ok(WaylandEvent::XdgTopLevelConfigure {
+            //         width,
+            //         height,
+            //         states,
+            //     })
+            //     // unmarshall_event!(buffer, XdgTopLevelConfigure {
+            //     //     width  => Uint32,
+            //     //     height => Uint32,
+            //     //     states => Array,
+            //     // })
+            // }
             _ => {
                 Err(eyre!("Event {event_id} for {self:?} doesn't have handler"))
             }
