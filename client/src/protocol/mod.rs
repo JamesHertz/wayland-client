@@ -76,7 +76,8 @@ pub enum WlEvent {
         interface: String,
         version: u32,
     },
-    WlCallBackDone(u32)
+    WlCallBackDone(u32),
+    WlShmFormat(base::WlShmFormatValue)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
