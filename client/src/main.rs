@@ -55,8 +55,11 @@ fn main() -> Result<()> {
     let xdg_surface : XdgSurface = client.new_object();
     wm_base.get_xdg_surface(&xdg_surface, &surface)?;
 
-    // TODO: get a window on the screen
-    // TODO: do some clean up
+    // TODO: 
+    //  - get a window on the screen
+    //  - do some clean up
+    //  - think about a way to have event handlers
+    //  - keep reading the WaylandBook c:
 
     loop {}
 
