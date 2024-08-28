@@ -291,11 +291,13 @@ impl ReceiverThread {
                 }
                 Err(err) => error!("Got error {err:#?} reading message!"),
                 Ok(msg) => {
-                    // trace!("Shipping event {msg:#?}");
-                    // TODO: have handlers for errors and delections c:
-                    self.channel
-                        .send(msg)
-                        .expect("Couldn't send event message over channel");
+                    if let Some(msg) = self.try_call(msg) {
+                        // trace!("Shipping event {msg:#?}");
+                        // TODO: have handlers for errors and delections c:
+                        self.channel
+                            .send(msg)
+                            .expect("Couldn't send event message over channel");
+                    }
                 }
             }
 
@@ -308,7 +310,37 @@ impl ReceiverThread {
             // }
         });
     }
+
+    fn try_call(&mut self, msg : WlEventMsg) -> Option<WlEventMsg> {
+        match &msg.1 {
+            WlShmFormat(_) => trace!("Ignoring WlShmFormat message!"),
+
+            // TODO: add interface type for each of the messages
+            WlDisplayError { object, message, .. } => {
+                error!("Error {message:?} for object {object}");
+            }
+
+            WlDisplayDeleteId(object_id) => {
+                debug!("Delecting object {object_id}");
+                self.object_ids
+                    .lock()
+                    .unwrap()
+                    .delete_id(*object_id);
+            }
+
+            other => {
+                return Some(msg)
+            }
+
+        }
+        None
+    }
+
 }
+
+
+
+
 
 // struct AsyncCallBack {
 //     proto_state: Locked<ProtocolState>,

@@ -1,5 +1,4 @@
 use super::*;
-// use crate::Result;
 use crate::{error::{self, fallback_error}, wire_format::parsing as parser};
 use log::{debug, info, trace};
 
@@ -81,7 +80,7 @@ pub enum WlShmFormatValue {
     Argb8888 = 0, Xrgb8888 = 1, Other(u32)
     // TODO: add all the remaining...
     
-    // , C8, Rgb332, Bgr233, Xrgb4444, Xbgr4444, Rgbx4444,
+    // C8, Rgb332, Bgr233, Xrgb4444, Xbgr4444, Rgbx4444,
     // Bgrx4444, Argb4444, Abgr4444, Rgba4444, Bgra4444, Xrgb1555, Xbgr1555,
     // Rgbx5551, Bgrx5551, Argb1555, Abgr1555, Rgba5551, Bgra5551, Rgb565,
     // Bgr565,   Rgb888,   Bgr888,   Xbgr8888, Rgbx8888, Bgrx8888, Abgr8888,
