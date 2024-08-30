@@ -162,19 +162,9 @@ impl WlShmFormatValue {
             WlShmFormatValue::Xrgb8888 => 1,
             WlShmFormatValue::Other(value) => value,
         }
+
     }
 }
-// impl Into<u32> for WlShmFormatValue {
-//
-//     fn into(value : WlShmFormatValue) -> u32 {
-//         match value {
-//             WlShmFormatValue::Argb8888 | WlShmFormatValue::Xrgb8888 => value as u32,
-//
-//         }
-//
-//     }
-//
-// }
 
 declare_interface!(
     WlShm,
@@ -276,32 +266,5 @@ impl WlShmPool {
 }
 
 declare_interface!(WlBuffer);
-declare_interface!(XdgSurface);
 declare_interface!(WlSurface);
 
-declare_interface!(XdgWmBase);
-
-impl XdgWmBase {
-    pub fn get_xdg_surface(
-        &self,
-        new_surface: &XdgSurface,
-        created_surface: &WlSurface,
-    ) -> Result<usize> {
-        debug!(
-            "{} @ {:?} -> create_surface( {}, {} )",
-            self.get_object_id(),
-            Self::get_interface_id(),
-            new_surface.get_object_id(),
-            created_surface.get_object_id()
-        );
-
-        self.0.stream.send(WireMessage {
-            object_id: self.get_object_id(),
-            request_id: 2,
-            values: &[
-                Uint32(new_surface.get_object_id()),
-                Uint32(created_surface.get_object_id()),
-            ],
-        })
-    }
-}

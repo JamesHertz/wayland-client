@@ -2,6 +2,7 @@ use crate::{error, wire_format::parsing, Result};
 use std::{fmt, rc::Rc, result::Result as StdResult};
 
 pub mod base;
+pub mod xdg_shell;
 mod macros;
 
 #[allow(unused_imports)]
@@ -92,6 +93,7 @@ pub enum WlInterfaceId {
     WlShmPool,
     WlBuffer,
     XdgSurface,
+    XdgTopLevel
 }
 
 #[derive(Debug)]

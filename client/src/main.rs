@@ -11,7 +11,11 @@ use std::{
     time::Duration,
 };
 
-use client::{client::WaylandClient, protocol::base::*, Result};
+use client::{
+    client::WaylandClient,
+    protocol::{base::*, xdg_shell::*},
+    Result,
+};
 
 use log::info;
 // use memmap::MmapOptions;
@@ -27,11 +31,11 @@ fn main() -> Result<()> {
     let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
     info!("Initialization completed!");
 
-    let width = 1920;
+    let width  = 1920;
     let height = 1080;
     let stride = 4 * width; // size of a line
     let window = width * height * 4;
-    let (pool, _buffer) = client.create_pool(window * 2)?;
+    let (pool, _pixel_buffer) = client.create_pool(window * 2)?;
     info!("BufferPool created!");
 
     let buffer: WlBuffer = client.new_object();
@@ -47,15 +51,22 @@ fn main() -> Result<()> {
     let compositor: WlCompositor =
         client.get_global().expect("Failed to get WlCompositor");
 
-    let surface : WlSurface = client.new_object();
+    let surface: WlSurface = client.new_object();
     compositor.create_surface(&surface)?;
 
-    let wm_base : XdgWmBase = client.get_global().expect("Failed to get XdgWmBase");
+    let wm_base: XdgWmBase =
+        client.get_global().expect("Failed to get XdgWmBase");
 
-    let xdg_surface : XdgSurface = client.new_object();
+    let xdg_surface: XdgSurface = client.new_object();
     wm_base.get_xdg_surface(&xdg_surface, &surface)?;
 
-    // TODO: 
+    let xdg_top_level : XdgTopLevel = client.new_object();
+    xdg_surface.get_top_level(&xdg_top_level)?;
+
+    xdg_top_level.set_title("Example App")?;
+
+
+    // TODO:
     //  - get a window on the screen
     //  - do some clean up
     //  - think about a way to have event handlers

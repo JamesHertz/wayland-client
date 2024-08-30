@@ -18,7 +18,7 @@ use std::{
 
 use crate::{
     error::{error_context, fallback_error, fatal_error, Error, Result},
-    protocol::{base::*, *},
+    protocol::{base::*, xdg_shell::*, *},
     wire_format::{ClientStream, WireMsgHeader},
 };
 
@@ -27,7 +27,7 @@ use log::{debug, error, info, trace};
 use memory::SharedBuffer;
 
 pub(super) type Locked<T> = Arc<Mutex<T>>;
-pub(super) type Shared<T> = Arc<RefCell<T>>;
+// pub(super) type Shared<T> = Arc<RefCell<T>>;
 
 type WlEventId = WaylandId;
 type WlObjectId = WaylandId;
@@ -90,7 +90,7 @@ impl WaylandClient {
                         "wl_compositor" => self.new_global_id::<WlCompositor>(),
                         "xdg_wm_base" => self.new_global_id::<XdgWmBase>(),
                         "wl_shm" => self.new_global_id::<WlShm>(),
-                        other => continue,
+                        _ => continue,
                     };
 
                     info!("Mapping {interface} to global");
@@ -230,13 +230,14 @@ impl WlIdManager {
     }
 }
 
-// struct SharedStream(Shared<UnixStream>);
-// unsafe impl Send for SharedStream {}
+struct SharedStream(Rc<ClientStream>);
+unsafe impl Send for SharedStream {}
 struct ReceiverThread {
     channel: Sender<WlEventMsg>,
     stream: UnixStream,
     object_ids: Locked<WlIdManager>,
     buffer: ByteBuffer,
+    wl_stream: SharedStream,
     // callbacks: AsyncCallBack,
 }
 
@@ -246,10 +247,14 @@ impl ReceiverThread {
         stream: UnixStream,
         object_ids: Locked<WlIdManager>,
     ) -> Self {
+        let wl_stream = SharedStream(Rc::new(ClientStream::new(
+            stream.try_clone().expect("Failed to clone UnixStream"),
+        )));
         Self {
             channel,
             object_ids,
             stream,
+            wl_stream,
             buffer: ByteBuffer::new(4 * 1024),
         }
     }
@@ -262,6 +267,23 @@ impl ReceiverThread {
 
     fn read_bytes(&mut self, size: usize) -> Result<&[u8]> {
         self.buffer.read_bytes(size, &mut self.stream)
+    }
+
+    fn get_object<T: WaylandInterface>(&mut self, object_id: WaylandId) -> T {
+        match self.get_object_info(object_id) {
+            Err(_err) => panic!( // TODO: look at this later
+                "No such object {object_id} @ {:?}.",
+                T::get_interface_id()
+            ),
+            Ok(obj) => {
+                assert_eq!(
+                    T::get_interface_id(),
+                    obj.interface_id,
+                    "Wrong interface for object {object_id}."
+                );
+                T::build(object_id, self.wl_stream.0.clone())
+            }
+        }
     }
 
     fn wait_for_msg(&mut self) -> Result<WlEventMsg> {
@@ -336,7 +358,7 @@ impl ReceiverThread {
                 self.object_ids.lock().unwrap().delete_id(*object_id);
             }
 
-            other => return Some(msg),
+            _ => return Some(msg),
         }
         None
     }
@@ -456,7 +478,6 @@ impl ByteBuffer {
         self.tail += size;
 
         let gotten = size + cached_bytes;
-
         if gotten == 0 {
             Err(fatal_error!(
                 "Read 0 bytes from stream! Maybe it was closed..."

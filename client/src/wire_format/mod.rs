@@ -1,5 +1,4 @@
 use crate::{
-    client::Shared,
     error::{error_context, fallback_error},
     protocol::*,
     Error, Result,
@@ -8,10 +7,8 @@ use std::{
     cell::RefCell,
     io::{IoSlice, Write},
     iter::Iterator,
-    ops::Deref,
     os::unix::net::{SocketAncillary, UnixStream},
     str,
-    sync::Arc,
 };
 
 use log::debug;

@@ -4,7 +4,7 @@
     iter_next_chunk,
     iter_advance_by
 )]
-// #![feature(specialization)]
+
 pub mod client;
 pub mod error;
 pub mod protocol;
