@@ -9,10 +9,8 @@ use std::{convert::TryFrom, result::Result as StdResult};
 
 declare_interface!(XdgWmBase);
 declare_interface!(
-    XdgSurface,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(XdgSurface),
+    @events(obj_id, iter) {
         0 => {
             let serial_nr = parser::parse_u32(&mut iter)?;
 
@@ -27,12 +25,9 @@ declare_interface!(
     } 
 );
 
-// declare_interface!(XdgTopLevel);
 declare_interface!(
-    XdgTopLevel,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(XdgTopLevel),
+    @events(obj_id, iter) {
         0 => {
             let (width, height, states) = (
                 parser::parse_i32(&mut iter)?,

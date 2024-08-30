@@ -6,10 +6,8 @@ use crate::{
 use log::{debug, info, trace};
 
 declare_interface!(
-    WlDisplay,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(WlDisplay),
+    @events(obj_id, iter) {
         0 => {
             let (object, code, message) = (
                 parser::parse_u32(&mut iter)?,
@@ -36,10 +34,8 @@ declare_interface!(
 );
 
 declare_interface!(
-    WlRegistry,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(WlRegistry),
+    @events(obj_id, iter) {
         0 => {
             let (name, interface, version) = (
                 parser::parse_u32(&mut iter)?,
@@ -58,10 +54,8 @@ declare_interface!(
 );
 
 declare_interface!(
-    WlCallBack,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(WlCallBack),
+    @events(obj_id, iter) {
         0 =>  {
             let cb_data = parser::parse_u32(&mut iter)?;
             debug!(
@@ -75,10 +69,8 @@ declare_interface!(
 );
 
 declare_interface!(
-    WlShm,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
+    @name(WlShm),
+    @events(obj_id, iter) {
         0 => {
             let format = match parser::parse_u32(&mut iter)? {
                 0 => WlShmFormatValue::Argb8888,

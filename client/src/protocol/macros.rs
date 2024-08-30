@@ -37,17 +37,11 @@ macro_rules! declare_interface {
         });
     };
 
-    // (
-    //     $name : ident, 
-    //     @iterator = $iter_name : ident, 
-    //     @branches = { $($parse_event : tt)+, } 
-    // ) => { compile_error!("Please remove the trailing comma ','."); };
-
     (
-        $name : ident, 
-        @iterator  = $iter_name : ident, 
-        @object_id = $object_id : ident, 
-        @branches = { $( $parse_event : tt)+ } 
+        @name($name : ident), 
+        @events($object_id : ident, $iter_name : ident) {
+            $( $parse_event : tt)+
+        }
     ) => {
 
         declare_interface!(@base_skeleton $name, {
