@@ -98,7 +98,7 @@ impl WaylandStream for ClientStream {
         let result = if let Some(fd) = file_desc {
             // 32 is s total random number, I think I only need 4 but I am not sure
             // TODO: do research on this ...
-            let mut ancillary_buffer = [0; 32]; 
+            let mut ancillary_buffer = [0; 32];
             let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
             ancillary.add_fds(&[fd][..]);
 
@@ -149,6 +149,34 @@ pub mod parsing {
 
     pub fn parse_i32(iter: &mut impl Iterator<Item = u8>) -> Result<i32> {
         Ok(parse_u32(iter)? as i32)
+    }
+
+    pub fn parse_u32_array(
+        iter: &mut impl Iterator<Item = u8>,
+    ) -> Result<Vec<u32>> {
+        let size =
+            error_context!(parse_u32(iter), "Failed to get u32 array size")?;
+
+        // FIXME: remove this condition and start checking if all the messages/events
+        // payload size (in bytes) are multiple or 32 bits
+        if size % 4 != 0 {
+            return Err(fallback_error!(
+                "u32 array size (in bytes) '{size}' is not multiple of 4."
+            ))
+        };
+
+        let array_size = size / 4;
+        let mut array = Vec::with_capacity(array_size as usize);
+        for i in 0..array_size {
+            let elem = error_context!(
+                parse_u32(iter),
+                "Failed to get all {array_size} elements of array, only gotten = {i}.",
+            )?;
+
+            array.push(elem);
+        }
+
+        Ok(array)
     }
 
     pub fn parse_str(iter: &mut impl Iterator<Item = u8>) -> Result<String> {

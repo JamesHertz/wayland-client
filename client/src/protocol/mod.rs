@@ -2,8 +2,8 @@ use crate::{error, wire_format::parsing, Result};
 use std::{fmt, rc::Rc, result::Result as StdResult};
 
 pub mod base;
-pub mod xdg_shell;
 mod macros;
+pub mod xdg_shell;
 
 #[allow(unused_imports)]
 pub use self::WireValue::*;
@@ -78,7 +78,14 @@ pub enum WlEvent {
         version: u32,
     },
     WlCallBackDone(u32),
-    WlShmFormat(base::WlShmFormatValue)
+    WlShmFormat(base::WlShmFormatValue),
+    XdgSurfaceConfigure(u32),
+    XdgTopLevelConfigure {
+        width: i32,
+        height: i32,
+        states: Vec<xdg_shell::XdgTopLevelState>,
+    },
+    XdgTopLevelWmCapabilities(Vec<xdg_shell::XdgWmCapabilities>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
@@ -93,7 +100,7 @@ pub enum WlInterfaceId {
     WlShmPool,
     WlBuffer,
     XdgSurface,
-    XdgTopLevel
+    XdgTopLevel,
 }
 
 #[derive(Debug)]
@@ -115,4 +122,3 @@ impl fmt::Display for EventParseError {
         write!(f, "{self:?}")
     }
 }
-

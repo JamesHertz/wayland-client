@@ -2,7 +2,7 @@
 #![allow(dead_code, unused_imports)]
 use std::{
     env,
-    io::{IoSlice, IoSliceMut},
+    io::{IoSlice, IoSliceMut, Read},
     os::{
         fd::{AsFd, AsRawFd},
         unix::net::{AncillaryData, SocketAncillary, UnixListener, UnixStream},
@@ -31,12 +31,20 @@ fn main() -> Result<()> {
     let mut client = WaylandClient::connect(&utils::wayland_sockpath())?;
     info!("Initialization completed!");
 
-    let width  = 1920;
+    let width = 1920;
     let height = 1080;
     let stride = 4 * width; // size of a line
-    let window = width * height * 4;
-    let (pool, _pixel_buffer) = client.create_pool(window * 2)?;
+    let window_size = width * height * 4;
+    let (pool, mut pixel_buffer) = client.create_pool(window_size * 2)?;
     info!("BufferPool created!");
+
+    {
+        // set buffer content to be dark
+        let data = pixel_buffer.as_mut();
+        for i in 1..window_size as usize  {
+            data[i] = 255;
+        }
+    }
 
     let buffer: WlBuffer = client.new_object();
     pool.create_buffer(
@@ -60,11 +68,14 @@ fn main() -> Result<()> {
     let xdg_surface: XdgSurface = client.new_object();
     wm_base.get_xdg_surface(&xdg_surface, &surface)?;
 
-    let xdg_top_level : XdgTopLevel = client.new_object();
+    let xdg_top_level: XdgTopLevel = client.new_object();
     xdg_surface.get_top_level(&xdg_top_level)?;
+    xdg_top_level.set_app_id("Example App")?;
+    xdg_top_level.set_title("Black Space")?;
+    surface.commit()?;
 
-    xdg_top_level.set_title("Example App")?;
-
+    surface.attach(&buffer, 0, 0)?;
+    surface.commit()?;
 
     // TODO:
     //  - get a window on the screen

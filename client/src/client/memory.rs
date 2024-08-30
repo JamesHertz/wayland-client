@@ -4,6 +4,7 @@ use std::{
     io::Read,
     iter,
     os::fd::{AsRawFd, FromRawFd},
+    ops::{Deref, DerefMut}
 };
 
 use crate::{
@@ -50,4 +51,21 @@ impl SharedBuffer {
 
         Ok(Self { shm_file, data })
     }
+}
+
+
+impl Deref for  SharedBuffer {
+    type Target = MmapMut;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+
+}
+
+impl DerefMut for SharedBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+
 }

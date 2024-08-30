@@ -19,7 +19,7 @@ declare_interface!(
 
             debug!(
                 "{obj_id} @ {:?} <- display_error( {object}, {code}, {message:?}",
-                WlDisplay::get_interface_id()
+                Self::get_interface_id()
             );
             WlDisplayError{ object, code, message }
         },
@@ -28,12 +28,79 @@ declare_interface!(
             let object = parser::parse_u32(&mut iter)?;
             debug!(
                 "{obj_id} @ {:?} <- delete_id ( {object} )",
-                WlDisplay::get_interface_id()
+                Self::get_interface_id()
             );
             WlDisplayDeleteId ( object )
         }
     }
 );
+
+declare_interface!(
+    WlRegistry,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 => {
+            let (name, interface, version) = (
+                parser::parse_u32(&mut iter)?,
+                parser::parse_str(&mut iter)?,
+                parser::parse_u32(&mut iter)?
+            );
+
+            debug!(
+                "{obj_id} @ {:?} <- global ( {name}, {interface:?}, {version} )",
+                Self::get_interface_id()
+            );
+
+            WlRegistryGlobal { name, interface, version }
+        }
+    }
+);
+
+declare_interface!(
+    WlCallBack,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 =>  {
+            let cb_data = parser::parse_u32(&mut iter)?;
+            debug!(
+                "{obj_id} @ {:?} <- done ( {cb_data} )",
+                Self::get_interface_id()
+            );
+
+            WlCallBackDone( cb_data )
+        }
+    }
+);
+
+declare_interface!(
+    WlShm,
+    @iterator  = iter,
+    @object_id = obj_id,
+    @branches  = {
+        0 => {
+            let format = match parser::parse_u32(&mut iter)? {
+                0 => WlShmFormatValue::Argb8888,
+                1 => WlShmFormatValue::Xrgb8888,
+                value => WlShmFormatValue::Other(value)
+            };
+
+            debug!(
+                "{obj_id} @ {:?} <- format ( {format:?} )",
+                Self::get_interface_id()
+            );
+            WlShmFormat( format )
+        }
+    }
+);
+
+declare_interface!(WlCompositor);
+declare_interface!(WlShmPool);
+declare_interface!(WlBuffer);
+declare_interface!(WlSurface);
+
+
 impl WlDisplay {
     pub fn sync(&self, callback: &WlCallBack) -> Result<usize> {
         debug!(
@@ -66,27 +133,6 @@ impl WlDisplay {
     }
 }
 
-declare_interface!(
-    WlRegistry,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
-        0 => {
-            let (name, interface, version) = (
-                parser::parse_u32(&mut iter)?,
-                parser::parse_str(&mut iter)?,
-                parser::parse_u32(&mut iter)?
-            );
-
-            debug!(
-                "{obj_id} @ {:?} <- global ( {name}, {interface:?}, {version} )",
-                WlDisplay::get_interface_id()
-            );
-
-            WlRegistryGlobal { name, interface, version }
-        }
-    }
-);
 impl WlRegistry {
     pub fn bind(
         &self,
@@ -114,22 +160,6 @@ impl WlRegistry {
     }
 }
 
-declare_interface!(
-    WlCallBack,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
-        0 =>  {
-            let cb_data = parser::parse_u32(&mut iter)?;
-            debug!(
-                "{obj_id} @ {:?} <- done ( {cb_data} )",
-                WlCallBack::get_interface_id()
-            );
-
-            WlCallBackDone( cb_data )
-        }
-    }
-);
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum WlShmFormatValue {
@@ -155,6 +185,7 @@ pub enum WlShmFormatValue {
                 // R1, R2, R4, R10, R12, Avuy8888, Xvuy8888, P030
 }
 
+// TODO: implement from for this c:
 impl WlShmFormatValue {
     fn into_u32(self) -> u32 {
         match self {
@@ -166,26 +197,8 @@ impl WlShmFormatValue {
     }
 }
 
-declare_interface!(
-    WlShm,
-    @iterator  = iter,
-    @object_id = obj_id,
-    @branches  = {
-        0 => {
-            let format = match parser::parse_u32(&mut iter)? {
-                0 => WlShmFormatValue::Argb8888,
-                1 => WlShmFormatValue::Xrgb8888,
-                value => WlShmFormatValue::Other(value)
-            };
 
-            debug!(
-                "{obj_id} @ {:?} <- format ( {format:?} )",
-                WlCallBack::get_interface_id()
-            );
-            WlShmFormat( format )
-        }
-    }
-);
+
 impl WlShm {
     pub fn create_pool(
         &self,
@@ -212,7 +225,6 @@ impl WlShm {
     }
 }
 
-declare_interface!(WlCompositor);
 impl WlCompositor {
     pub fn create_surface(&self, surface: &WlSurface) -> Result<usize> {
         debug!(
@@ -230,7 +242,6 @@ impl WlCompositor {
     }
 }
 
-declare_interface!(WlShmPool);
 impl WlShmPool {
     pub fn create_buffer(
         &self,
@@ -265,6 +276,41 @@ impl WlShmPool {
     }
 }
 
-declare_interface!(WlBuffer);
-declare_interface!(WlSurface);
 
+impl WlSurface {
+
+    pub fn attach(&self, buffer : &WlBuffer, x : i32, y : i32) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> attach( {}, {x}, {y})",
+            self.get_object_id(),
+            Self::get_interface_id(),
+            buffer.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 1,
+            values: &[
+                Uint32(buffer.get_object_id()),
+                Int32(x),
+                Int32(y),
+            ],
+        })
+
+    }
+
+    pub fn commit(&self) -> Result<usize> {
+        debug!(
+            "{} @ {:?} -> commit()",
+            self.get_object_id(),
+            Self::get_interface_id(),
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 6,
+            values: &[],
+        })
+
+    }
+}

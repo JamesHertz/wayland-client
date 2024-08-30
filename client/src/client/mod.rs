@@ -22,7 +22,7 @@ use crate::{
     wire_format::{ClientStream, WireMsgHeader},
 };
 
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 
 use memory::SharedBuffer;
 
@@ -356,6 +356,18 @@ impl ReceiverThread {
             WlDisplayDeleteId(object_id) => {
                 debug!("Delecting object {object_id}.");
                 self.object_ids.lock().unwrap().delete_id(*object_id);
+            }
+
+            XdgTopLevelWmCapabilities(_) => {
+                warn!("Ignoring XdgTopLevelWmCapabilities event ... (PLEASE FIX THIS LATER)")
+            }
+
+            XdgSurfaceConfigure(_) => {
+                warn!("Ignoring XdgSurfaceConfigure event ... (PLEASE FIX THIS LATER)")
+            }
+
+            XdgTopLevelConfigure { .. } => {
+                warn!("Ignoring XdgTopLevelConfigure ... (PLEASE FIX THIS LATER)")
             }
 
             _ => return Some(msg),
