@@ -370,6 +370,13 @@ impl ReceiverThread {
                 warn!("Ignoring XdgTopLevelConfigure ... (PLEASE FIX THIS LATER)")
             }
 
+            WlSurfacePreferredBufferScale(_) => {
+                warn!("Ignoring WlSurfacePreferredBufferScale ... (PLEASE FIX THIS LATER)")
+            }
+
+            WlSurfacePreferredBufferTransform(_) => {
+                warn!("Ignoring WlSurfacePreferredBufferTransform ... (PLEASE FIX THIS LATER)")
+            }
             _ => return Some(msg),
         }
         None

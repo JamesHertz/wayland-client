@@ -46,8 +46,9 @@ impl ClientStream {
 
 impl WaylandStream for ClientStream {
     fn send(&self, msg: WireMessage<'_>) -> Result<usize> {
-        // debug!("Sending message {msg:#?}");
-        let mut buffer = Vec::with_capacity(128);
+        // 128 bytes seems to be a good default. For what I've seen I think that
+        // hardly any request will need so many bytes.
+        let mut buffer = Vec::with_capacity(128); 
 
         write_u32(&mut buffer, msg.object_id);
         write_u32(&mut buffer, 0); // will be filled in the end
@@ -63,7 +64,7 @@ impl WaylandStream for ClientStream {
                     let str_size = 1 + bytes.len() as u32; // +1 because of the 'null terminator'
                     write_u32(&mut buffer, str_size);
                     write_bytes(&mut buffer, bytes);
-                    write_bytes(&mut buffer, &[0; 1]);
+                    write_bytes(&mut buffer, &[0; 1]); // the string null terminator
 
                     let str_size = str_size as usize;
                     let aligned_size = str_aligned_size(str_size);
@@ -161,7 +162,7 @@ pub mod parsing {
         // payload size (in bytes) are multiple or 32 bits
         if size % 4 != 0 {
             return Err(fallback_error!(
-                "u32 array size (in bytes) '{size}' is not multiple of 4."
+                "u32 array size (in bytes) '{size}' is not multiple of 32 bits."
             ))
         };
 
@@ -184,7 +185,7 @@ pub mod parsing {
             error_context!(parse_u32(iter), "Failed to get String size.")?
                 as usize;
 
-        let str_data = next_n_items(iter, str_size).ok_or(fallback_error!(
+        let str_data = next_n_bytes(iter, str_size).ok_or(fallback_error!(
             "Failed to get {str_size} bytes for str data."
         ))?;
 
@@ -202,7 +203,7 @@ pub mod parsing {
         Ok(result.to_string())
     }
 
-    fn next_n_items(
+    fn next_n_bytes(
         iter: &mut impl Iterator<Item = u8>,
         items: usize,
     ) -> Option<Vec<u8>> {

@@ -51,10 +51,6 @@ macro_rules! declare_interface {
                 payload: &[u8],
             ) -> crate::protocol::EventParseResult<WlEvent> {
                 let mut $iter_name = payload.iter().cloned();
-                // debug!(
-                //     "Received message {event_id} for object {}@{:?}", 
-                //     $object_id, Self::get_interface_id()
-                // );
 
                 let event = match event_id {
                     $($parse_event)+,
