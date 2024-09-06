@@ -41,8 +41,8 @@ fn main() -> Result<()> {
     {
         // set buffer content to be dark
         let data = pixel_buffer.as_mut();
-        for i in 1..window_size as usize  {
-            data[i] = 255;
+        for i in (1..window_size as usize).step_by(4) {
+            data[i + 1] = 255;
         }
     }
 
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
         width,
         height,
         stride,
-        WlShmFormatValue::Argb8888,
+        WlShmFormatValue::Xrgb8888,
     )?;
 
     let compositor: WlCompositor =
@@ -70,12 +70,31 @@ fn main() -> Result<()> {
 
     let xdg_top_level: XdgTopLevel = client.new_object();
     xdg_surface.get_top_level(&xdg_top_level)?;
-    xdg_top_level.set_app_id("Example App")?;
+    xdg_top_level.set_app_id("example-app")?;
     xdg_top_level.set_title("Black Space")?;
     surface.commit()?;
 
     surface.attach(&buffer, 0, 0)?;
     surface.commit()?;
+
+    client.event_loop()
+    // client.add_event_listener(&buffer, even_listener!(WlClose => { 
+    //     let object = get_object!();
+    //     info!("Ending this...");
+    //     process::exit(1)
+    // }));
+
+    // client.add_event_listener(&buffer, |buffer, event| {
+    //     match event {
+    //         XdgClose => {
+    //
+    //         }
+    //         event => {
+    //             return Some(event)
+    //         }
+    //     }
+    //     Nothing
+    // })
 
     // TODO:
     //  - get a window on the screen
@@ -83,155 +102,6 @@ fn main() -> Result<()> {
     //  - think about a way to have event handlers
     //  - keep reading the WaylandBook c:
 
-    loop {}
-
-    // info!("Waiting to see if any error will arrive!");
-    // thread::sleep(Duration::from_secs(30));
-
-    // let messages = client.pull_messages()?;
-    // info!("Gotten messages {messages:?}");
-    //
-    // // 1920x1080
-    // let width  : i32 = 1920;
-    // let height : i32 = 1080;
-    // // let width  : i32 = 960;
-    // // let height : i32 = 1030;
-    // let stride : i32 = 4 * width;
-    // let window_size : i32 = 4 * height * stride;
-    // let pool_size   : i32 = 2 * window_size;
-    // info!("Pool size : {}", pool_size);
-    //
-    // let (pool_id, mem_buffer_id) = client.create_pool(pool_size as usize)?;
-    // {
-    //     let mem = client.get_shared_buffer(mem_buffer_id).unwrap();
-    //     mem.data.as_mut().fill(0);
-    //     info!("Mem size {}", mem.data.len())
-    // }
-    //
-    // info!("Created pool {pool_id} ...");
-    // thread::sleep(Duration::from_secs(1));
-    //
-    // let buffer_id = client.new_id(WaylandObject::Buffer);
-    // client.send_request(
-    //     pool_id, WaylandRequest::ShmPoolCreateBuffer {
-    //         buffer_id,  offset: 0, width, height, stride, pixel_format: ShmPixelFormat::Xrgb
-    //     }
-    // )?;
-    //
-    // info!("Created Buffer {buffer_id} ...");
-    //
-    // let surface_id = {
-    //     let compositor_id = client.get_global_mapping(
-    //         WaylandObject::Compositor
-    //     ).unwrap();
-    //     let surface_id= client.new_id(WaylandObject::Surface);
-    //     client.send_request(
-    //         compositor_id,
-    //         WaylandRequest::CompositorCreateSurface(surface_id)
-    //     )?;
-    //     info!("Created surface {surface_id} ... ");
-    //     thread::sleep(Duration::from_secs(1));
-    //
-    //
-    //     // client.send_request(
-    //     //     surfarce_id,
-    //     //     WaylandRequest::SufaceCommit
-    //     // )?;
-    //     // info!("Commited Surface");
-    //     surface_id
-    // };
-    //
-    // let window_xdg_surface_id = {
-    //     let xdg_wm_base_id = client.get_global_mapping(
-    //         WaylandObject::XdgWmBase
-    //     ).unwrap();
-    //
-    //     let xdg_suface_id = client.new_id(WaylandObject::XdgSurface);
-    //     client.send_request(
-    //         xdg_wm_base_id,
-    //         WaylandRequest::XdgWmGetSurface {
-    //             new_id: xdg_suface_id, surface: surface_id
-    //         }
-    //     )?;
-    //
-    //     info!("Got an xdg_suface {xdg_suface_id} ...");
-    //     thread::sleep(Duration::from_secs(1));
-    //
-    //     let top_level_id = client.new_id(WaylandObject::XdgTopLevel);
-    //     client.send_request(
-    //         xdg_suface_id,
-    //         WaylandRequest::XdgSurfaceGetTopLevel(top_level_id)
-    //     )?;
-    //
-    //     info!("Got an xdg_top_level {top_level_id} ...");
-    //     thread::sleep(Duration::from_secs(1));
-    //
-    //     top_level_id
-    // };
-    //
-    // client.send_request(
-    //     window_xdg_surface_id,
-    //     WaylandRequest::XdgTopLevelSetTitle("Example app".to_string())
-    // )?;
-    //
-    // info!("Set xdg_top_level {window_xdg_surface_id} to 'Example app' ...");
-    // thread::sleep(Duration::from_secs(1));
-    //
-    // client.send_request(
-    //     surface_id,
-    //     WaylandRequest::SufaceCommit
-    // )?;
-    //
-    // info!("Committed surface");
-    // thread::sleep(Duration::from_secs(1));
-    //
-    // client.send_request(
-    //     surface_id,
-    //     WaylandRequest::SufaceAttach {
-    //         buffer_id, x: 0, y : 0
-    //     }
-    // )?;
-    //
-    // info!("Attached surface {surface_id} to buffer {buffer_id} ...");
-    // thread::sleep(Duration::from_secs(1));
-    //
-    // let mem = client.get_shared_buffer(mem_buffer_id).unwrap();
-    // for i in (1..window_size).step_by(4) {
-    //     mem.data.as_mut()[i as usize] = 255;
-    // }
-    //
-    // client.send_request(
-    //     surface_id,
-    //     WaylandRequest::SufaceCommit
-    // )?;
-    //
-    // info!("Committed surface");
-    // info!("Waiting for errors");
-    //
-    //
-    //
-    // loop{}
-    //
-    // let shm_id = client.get_global_mapping(WaylandObject::Shm).unwrap();
-    // let shared_buffer = client.create_buffer(1024 * 1024 * 4)?;
-
-    // shared_buffer.data.len();
-
-    // let compositor   = client.get_global(WaylandObject::Compositor).unwrap();
-    // let sufurface_id = client.new_id(WaylandObject::Surface);
-    // client.send_request(
-    //     compositor, WaylandRequest::CompositorCreateSurface(sufurface_id)
-    // )?;
-    //
-    // let wm = client.get_global(WaylandObject::XdgWmBase).unwrap();
-    // let xdg_surface_id = client.new_id(WaylandObject::XdgSurface);
-    // client.send_request(
-    //     wm, WaylandRequest::XdgWmGetSurface { new_id: xdg_surface_id, surface: sufurface_id }
-    // )?;
-    //
-    // let messages = client.pull_msgs();
-    // info!("You've got {:?} messages", messages);
-    Ok(())
 }
 
 mod utils {

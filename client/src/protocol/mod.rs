@@ -88,6 +88,7 @@ pub enum WlEvent {
     XdgTopLevelWmCapabilities(Vec<xdg_shell::XdgWmCapabilities>),
     WlSurfacePreferredBufferScale(u32),
     WlSurfacePreferredBufferTransform(base::WlOutputTransform),
+    WlBufferRelease
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]

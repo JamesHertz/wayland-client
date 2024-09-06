@@ -90,7 +90,16 @@ declare_interface!(
 
 declare_interface!(WlCompositor);
 declare_interface!(WlShmPool);
-declare_interface!(WlBuffer);
+declare_interface!(
+    @name(WlBuffer),
+    @events(obj_id, _iter) {
+        0 => {
+            debug!("{obj_id} @ {:?} <- release( )", Self::get_interface_id());
+            WlBufferRelease
+        }
+    }
+);
+
 declare_interface!(
     @name(WlSurface),
     @events(obj_id, iter) {

@@ -35,52 +35,60 @@ type EventParseFunc =
     for<'a> fn(WlEventId, WlObjectId, &'a [u8]) -> EventParseResult<WlEvent>;
 
 type WlEventMsg = (WlObjectId, WlEvent);
+// type WlEventHandler<T> = Fn(T, WlEvent) -> Option<WlEventMsg>;
 
 pub struct WaylandClient {
     globals: HashMap<WlInterfaceId, WaylandId>,
-    ids: Locked<WlIdManager>,
-    wl_stream: Rc<ClientStream>,
-    event_receiver: Receiver<WlEventMsg>,
+    ids: WlIdManager,
+    // event_receiver: Receiver<WlEventMsg>,
     wl_display: Option<WlDisplay>,
+    wl_stream: Rc<ClientStream>,
+    stream: UnixStream,
+    buffer: ByteBuffer,
 }
 
 impl WaylandClient {
     pub fn connect(socket_path: &str) -> Result<Self> {
-        let (event_sender, event_receiver) = mpsc::channel();
-        let socket = error_context!(
+        // let (event_sender, event_receiver) = mpsc::channel();
+        let stream = error_context!(
             UnixStream::connect(dbg!(socket_path)),
             "Failed to establish connection."
         )?;
 
-        let object_ids = Arc::new(Mutex::new(WlIdManager::new()));
+        // let ids = Arc::new(Mutex::new(WlIdManager::new()));
         let mut client = Self {
-            event_receiver,
+            // event_receiver,
+            ids: WlIdManager::new(),
             globals: HashMap::new(),
             wl_stream: Rc::new(ClientStream::new(
-                socket.try_clone().expect("Unable to clone UnixStream"),
+                stream.try_clone().expect("Unable to clone UnixStream"),
             )),
-            ids: Arc::clone(&object_ids),
+            buffer: ByteBuffer::new(4 * 1024),
             wl_display: None,
+            stream,
         };
 
         let display: WlDisplay = client.new_global();
         assert!(display.get_object_id() == 1);
-        ReceiverThread::new(event_sender, socket, object_ids).start();
+        // ReceiverThread::new(event_sender, socket, object_ids).start();
 
         client.wl_display = Some(display);
-        client.initialize_client()?;
+        client.load_globals()?;
 
         Ok(client)
     }
 
-    fn initialize_client(&mut self) -> Result<()> {
+    fn load_globals(&mut self) -> Result<()> {
         let registry: WlRegistry = self.new_global();
-        self.wl_display().get_registry(&registry)?;
-        // self.wl_display().get_registry(&registry.get_object_id())?;
+        let callback: WlCallBack = self.new_object();
+        let display = self.wl_display();
 
-        let events = self.pull_events()?;
-        for ev in events {
-            match ev {
+        display.get_registry(&registry)?;
+        display.sync(&callback)?;
+
+        loop {
+            let (obj_id, event) = self.next_msg()?;
+            match event {
                 WlRegistryGlobal {
                     name,
                     interface,
@@ -96,11 +104,12 @@ impl WaylandClient {
                     info!("Mapping {interface} to global");
                     registry.bind(name, interface, version, object_id)?;
                 }
+                WlCallBackDone(_) if obj_id == callback.get_object_id() => {
+                    return Ok(())
+                }
                 other => panic!("Unexpected message {other:?}"),
             }
         }
-
-        Ok(())
     }
 
     pub fn create_pool(
@@ -127,15 +136,34 @@ impl WaylandClient {
     }
 
     pub fn new_object<T: WaylandInterface>(&mut self) -> T {
-        let object_id = self.ids.lock().unwrap().new_id::<T>();
+        let object_id = self.ids.new_id::<T>();
         self.build_wlobject(object_id)
     }
 
     pub fn delete_object(&mut self, object: impl WaylandInterface) {
-        self.ids.lock().unwrap().delete_id(object.get_object_id());
+        self.ids.delete_id(object.get_object_id());
+    }
+
+    pub fn event_loop(mut self) -> ! {
+        loop {
+            match self.next_msg() {
+                Err(err) if err.is_fatal() => {
+                    error!("Fatal error: {err:#?}");
+                    process::exit(1)
+                }
+                Err(err) => error!("Got error {err:#?} reading message!"),
+                Ok(msg) => {
+                    // TODO: fix this later c:
+                    if let Some(msg) = self.try_call(msg) {
+                        warn!("Ignoring msg {msg:?}");
+                    }
+                }
+            }
+        }
     }
 
     // helper functions
+    // FIXME: remove this method
     fn wl_display(&self) -> &WlDisplay {
         self.wl_display.as_ref().unwrap()
     }
@@ -157,27 +185,68 @@ impl WaylandClient {
         object
     }
 
-    fn pull_events(&mut self) -> Result<Vec<WlEvent>> {
-        let mut events = Vec::new();
-        let callback: WlCallBack = self.new_object();
-
-        let display = self.wl_display();
-        display.sync(&callback)?;
-        // display.sync(callback.get_object_id())?;
-
-        loop {
-            match self.event_receiver.recv().unwrap() {
-                (obj_id, WlCallBackDone(_))
-                    if obj_id == callback.get_object_id() =>
-                {
-                    break;
-                }
-                (_, event) => events.push(event),
-            }
-        }
-
-        Ok(events)
+    fn get_object_info(&mut self, object_id: u32) -> Result<WlObjectInfo> {
+        self.ids.get_object_info(object_id)
+                .ok_or(fallback_error!("No info registered for object {object_id}"))
     }
+
+    fn next_msg(&mut self) -> Result<WlEventMsg> {
+        let header = WireMsgHeader::build(error_context!(
+            self.read_bytes(WireMsgHeader::WIRE_SIZE),
+            "Failed to read wire message header"
+        )?);
+
+        trace!(
+            "Received a msg from {} with {} size",
+            header.object_id,
+            header.length
+        );
+
+        let obj_info = self.get_object_info(header.object_id)?;
+        let payload = error_context!(
+            self.read_bytes(header.length as usize - WireMsgHeader::WIRE_SIZE),
+            "Failed to read message payload"
+        )?;
+
+        let event = error_context!(
+            (obj_info.event_parse_func)(
+                header.object_id,
+                header.method_id.into(),
+                payload
+            ),
+            "Unable to parse event {} for object {} @ {:?}",
+            header.method_id,
+            header.object_id,
+            obj_info.interface_id
+        )?;
+
+        Ok((header.object_id, event))
+    }
+
+    fn read_bytes(&mut self, size: usize) -> Result<&[u8]> {
+        self.buffer.read_bytes(size, &mut self.stream)
+    }
+
+    fn try_call(&mut self, msg: WlEventMsg) -> Option<WlEventMsg> {
+        match &msg.1 {
+            WlShmFormat(_) => trace!("Ignoring WlShmFormat message!"),
+
+            // TODO: add interface type for each of the messages
+            WlDisplayError {
+                object, message, ..
+            } => {
+                error!("Error {message:?} for object {object}.");
+            }
+
+            WlDisplayDeleteId(object_id) => {
+                debug!("Delecting object {object_id}.");
+                self.ids.delete_id(*object_id);
+            }
+            _ => return Some(msg),
+        }
+        None
+    }
+
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -229,219 +298,6 @@ impl WlIdManager {
         self.object_ids.get(&object_id).copied()
     }
 }
-
-struct SharedStream(Rc<ClientStream>);
-unsafe impl Send for SharedStream {}
-struct ReceiverThread {
-    channel: Sender<WlEventMsg>,
-    stream: UnixStream,
-    object_ids: Locked<WlIdManager>,
-    buffer: ByteBuffer,
-    wl_stream: SharedStream,
-    // callbacks: AsyncCallBack,
-}
-
-impl ReceiverThread {
-    fn new(
-        channel: Sender<WlEventMsg>,
-        stream: UnixStream,
-        object_ids: Locked<WlIdManager>,
-    ) -> Self {
-        let wl_stream = SharedStream(Rc::new(ClientStream::new(
-            stream.try_clone().expect("Failed to clone UnixStream"),
-        )));
-        Self {
-            channel,
-            object_ids,
-            stream,
-            wl_stream,
-            buffer: ByteBuffer::new(4 * 1024),
-        }
-    }
-
-    fn get_object_info(&mut self, object_id: u32) -> Result<WlObjectInfo> {
-        let ids = self.object_ids.lock().unwrap();
-        ids.get_object_info(object_id)
-            .ok_or(fallback_error!("No info registered for object {object_id}"))
-    }
-
-    fn read_bytes(&mut self, size: usize) -> Result<&[u8]> {
-        self.buffer.read_bytes(size, &mut self.stream)
-    }
-
-    fn get_object<T: WaylandInterface>(&mut self, object_id: WaylandId) -> T {
-        match self.get_object_info(object_id) {
-            Err(_err) => panic!( // TODO: look at this later
-                "No such object {object_id} @ {:?}.",
-                T::get_interface_id()
-            ),
-            Ok(obj) => {
-                assert_eq!(
-                    T::get_interface_id(),
-                    obj.interface_id,
-                    "Wrong interface for object {object_id}."
-                );
-                T::build(object_id, self.wl_stream.0.clone())
-            }
-        }
-    }
-
-    fn wait_for_msg(&mut self) -> Result<WlEventMsg> {
-        let header = WireMsgHeader::build(error_context!(
-            self.read_bytes(WireMsgHeader::WIRE_SIZE),
-            "Failed to read wire message header"
-        )?);
-
-        trace!(
-            "Received a msg from {} with {} size",
-            header.object_id,
-            header.length
-        );
-
-        let obj_info = self.get_object_info(header.object_id)?;
-        let payload = error_context!(
-            self.read_bytes(header.length as usize - WireMsgHeader::WIRE_SIZE),
-            "Failed to read message payload"
-        )?;
-
-        let event = error_context!(
-            (obj_info.event_parse_func)(
-                header.object_id,
-                header.method_id.into(),
-                payload
-            ),
-            "Unable to parse event {} for object {} @ {:?}",
-            header.method_id,
-            header.object_id,
-            obj_info.interface_id
-        )?;
-
-        Ok((header.object_id, event))
-    }
-
-    fn start(mut self) {
-        info!("Launching background thread.");
-        thread::spawn(move || loop {
-            // TODO: fix this later
-            match self.wait_for_msg() {
-                Err(err) if err.is_fatal() => {
-                    error!("Fatal error: {err:#?}");
-                    process::exit(1)
-                }
-                Err(err) => error!("Got error {err:#?} reading message!"),
-                Ok(msg) => {
-                    if let Some(msg) = self.try_call(msg) {
-                        // trace!("Shipping event {msg:#?}");
-                        // TODO: have handlers for errors and delections c:
-                        self.channel
-                            .send(msg)
-                            .expect("Couldn't send event message over channel");
-                    }
-                }
-            }
-        });
-    }
-
-    fn try_call(&mut self, msg: WlEventMsg) -> Option<WlEventMsg> {
-        match &msg.1 {
-            WlShmFormat(_) => trace!("Ignoring WlShmFormat message!"),
-
-            // TODO: add interface type for each of the messages
-            WlDisplayError {
-                object, message, ..
-            } => {
-                error!("Error {message:?} for object {object}.");
-            }
-
-            WlDisplayDeleteId(object_id) => {
-                debug!("Delecting object {object_id}.");
-                self.object_ids.lock().unwrap().delete_id(*object_id);
-            }
-
-            XdgTopLevelWmCapabilities(_) => {
-                warn!("Ignoring XdgTopLevelWmCapabilities event ... (PLEASE FIX THIS LATER)")
-            }
-
-            XdgSurfaceConfigure(_) => {
-                warn!("Ignoring XdgSurfaceConfigure event ... (PLEASE FIX THIS LATER)")
-            }
-
-            XdgTopLevelConfigure { .. } => {
-                warn!("Ignoring XdgTopLevelConfigure ... (PLEASE FIX THIS LATER)")
-            }
-
-            WlSurfacePreferredBufferScale(_) => {
-                warn!("Ignoring WlSurfacePreferredBufferScale ... (PLEASE FIX THIS LATER)")
-            }
-
-            WlSurfacePreferredBufferTransform(_) => {
-                warn!("Ignoring WlSurfacePreferredBufferTransform ... (PLEASE FIX THIS LATER)")
-            }
-            _ => return Some(msg),
-        }
-        None
-    }
-}
-
-// struct AsyncCallBack {
-//     proto_state: Locked<ProtocolState>,
-//     proto_ids: LockedProtocolIds,
-//     stream: UnixStream,
-// }
-//
-// impl AsyncCallBack {
-//     fn new(
-//         proto_state: Locked<ProtocolState>,
-//         proto_ids: LockedProtocolIds,
-//         stream: UnixStream,
-//     ) -> Self {
-//         Self {
-//             proto_state,
-//             proto_ids,
-//             stream,
-//         }
-//     }
-//
-//     fn try_call(
-//         &mut self,
-//         msg: WaylandEventMessage,
-//     ) -> Option<WaylandEventMessage> {
-//         match msg.event {
-//             WaylandEvent::ShmFormat(format) => {
-//                 let mut mutex = self.proto_state.lock().unwrap();
-//                 let state = mutex.borrow_mut();
-//                 state.shm_format.push(format);
-//                 warn!("Adding +1 shm format!");
-//             }
-//
-//             WaylandEvent::DisplayError { message, .. } => {
-//                 panic!("Display error {message}");
-//             }
-//
-//             WaylandEvent::DisplayDelete(item) => {
-//                 warn!("Received delecting msg for {item}");
-//                 self.proto_ids.lock().unwrap().remove(&item);
-//             }
-//
-//             // WaylandEvent::XdgSurfaceConfigure(value) => {
-//             //     warn!("Received")
-//             // }
-//             WaylandEvent::XdgSurfaceConfigure(serial) => {
-//                 warn!("Received configure with serial = {serial}");
-//                 match wire_messages::make_request(
-//                     &mut self.stream,
-//                     msg.sender_id,
-//                     WaylandRequest::XdgSurfaceAckConfigure(serial),
-//                 ) {
-//                     Ok(_) => warn!("Configure-ack sent with success"),
-//                     Err(err) => warn!("Error sending configure-ack {err:?}"),
-//                 };
-//             }
-//             _ => return Some(msg),
-//         }
-//         None
-//     }
-// }
 
 // TODO: review this implementation later
 pub struct ByteBuffer {
