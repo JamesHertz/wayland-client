@@ -1,8 +1,6 @@
 use memmap::{MmapMut, MmapOptions};
 use std::{
     fs::File,
-    io::Read,
-    iter,
     os::fd::{AsRawFd, FromRawFd},
     ops::{Deref, DerefMut}
 };

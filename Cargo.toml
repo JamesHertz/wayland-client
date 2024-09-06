@@ -1,5 +1,7 @@
 [workspace]
 
-members = [
+# TODO: remove this later
+resolver = "1"
+members  = [
   "client"
 ]

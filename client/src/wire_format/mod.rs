@@ -11,8 +11,6 @@ use std::{
     str,
 };
 
-use log::debug;
-
 #[derive(Debug)]
 pub struct WireMsgHeader {
     pub object_id: u32,

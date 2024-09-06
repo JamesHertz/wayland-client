@@ -1,23 +1,15 @@
 pub mod memory;
 
 use std::{
-    cell::RefCell,
     collections::HashMap,
-    io::{Read, Write},
-    iter,
-    ops::Deref,
+    io::Read,
     os::unix::net::UnixStream,
     process,
     rc::Rc,
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
-    },
-    thread,
 };
 
 use crate::{
-    error::{error_context, fallback_error, fatal_error, Error, Result},
+    error::{error_context, fallback_error, fatal_error, Result},
     protocol::{base::*, xdg_shell::*, *},
     wire_format::{ClientStream, WireMsgHeader},
 };
@@ -25,9 +17,6 @@ use crate::{
 use log::{debug, error, info, trace, warn};
 
 use memory::SharedBuffer;
-
-pub(super) type Locked<T> = Arc<Mutex<T>>;
-// pub(super) type Shared<T> = Arc<RefCell<T>>;
 
 type WlEventId = WaylandId;
 type WlObjectId = WaylandId;
@@ -40,8 +29,6 @@ type WlEventMsg = (WlObjectId, WlEvent);
 pub struct WaylandClient {
     globals: HashMap<WlInterfaceId, WaylandId>,
     ids: WlIdManager,
-    // event_receiver: Receiver<WlEventMsg>,
-    wl_display: Option<WlDisplay>,
     wl_stream: Rc<ClientStream>,
     stream: UnixStream,
     buffer: ByteBuffer,
@@ -49,30 +36,24 @@ pub struct WaylandClient {
 
 impl WaylandClient {
     pub fn connect(socket_path: &str) -> Result<Self> {
-        // let (event_sender, event_receiver) = mpsc::channel();
         let stream = error_context!(
             UnixStream::connect(dbg!(socket_path)),
             "Failed to establish connection."
         )?;
 
-        // let ids = Arc::new(Mutex::new(WlIdManager::new()));
         let mut client = Self {
-            // event_receiver,
             ids: WlIdManager::new(),
             globals: HashMap::new(),
+            buffer : ByteBuffer::new(4 * 1024),
             wl_stream: Rc::new(ClientStream::new(
                 stream.try_clone().expect("Unable to clone UnixStream"),
             )),
-            buffer: ByteBuffer::new(4 * 1024),
-            wl_display: None,
             stream,
         };
 
         let display: WlDisplay = client.new_global();
         assert!(display.get_object_id() == 1);
-        // ReceiverThread::new(event_sender, socket, object_ids).start();
 
-        client.wl_display = Some(display);
         client.load_globals()?;
 
         Ok(client)
@@ -81,7 +62,8 @@ impl WaylandClient {
     fn load_globals(&mut self) -> Result<()> {
         let registry: WlRegistry = self.new_global();
         let callback: WlCallBack = self.new_object();
-        let display = self.wl_display();
+        let display:  WlDisplay  =
+            self.get_global().expect("Failed to get WlDisplay");
 
         display.get_registry(&registry)?;
         display.sync(&callback)?;
@@ -163,11 +145,6 @@ impl WaylandClient {
     }
 
     // helper functions
-    // FIXME: remove this method
-    fn wl_display(&self) -> &WlDisplay {
-        self.wl_display.as_ref().unwrap()
-    }
-
     #[inline]
     fn new_global_id<T: WaylandInterface>(&mut self) -> WaylandId {
         self.new_global::<T>().get_object_id()
@@ -186,8 +163,9 @@ impl WaylandClient {
     }
 
     fn get_object_info(&mut self, object_id: u32) -> Result<WlObjectInfo> {
-        self.ids.get_object_info(object_id)
-                .ok_or(fallback_error!("No info registered for object {object_id}"))
+        self.ids
+            .get_object_info(object_id)
+            .ok_or(fallback_error!("No info registered for object {object_id}"))
     }
 
     fn next_msg(&mut self) -> Result<WlEventMsg> {
@@ -246,7 +224,6 @@ impl WaylandClient {
         }
         None
     }
-
 }
 
 #[derive(Debug, Clone, Copy)]

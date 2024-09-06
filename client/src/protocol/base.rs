@@ -3,7 +3,7 @@ use crate::{
     error::{self, fallback_error},
     wire_format::parsing as parser,
 };
-use log::{debug, info, trace};
+use log::debug;
 use std::convert::TryFrom;
 
 declare_interface!(

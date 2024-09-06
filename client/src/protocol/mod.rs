@@ -1,4 +1,4 @@
-use crate::{error, wire_format::parsing, Result};
+use crate::{error, Result};
 use std::{fmt, rc::Rc, result::Result as StdResult};
 
 pub mod base;
