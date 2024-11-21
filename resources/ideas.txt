@@ -1,0 +1,167 @@
+#[derive(Debug)]
+pub enum WireValue {
+    Uint32(u32),
+    Int32(i32),
+    Str(String),
+    Array(Vec<u8>),
+    FileDesc(i32),
+}
+
+#[derive(Debug)]
+pub struct WireMessage<'a> {
+    pub object_id: WaylandId,
+    pub request_id: WaylandId,
+    pub values: &'a [WireValue],
+}
+
+// Implementation of this trait are recommended to use interior mutability
+// (https://doc.rust-lang.org/reference/interior-mutability.html)
+pub trait WaylandStream {
+    fn send(&self, msg: WireMessage) -> Result<usize>;
+}
+
+
+type WlEventHandler<T> = dyn FnMut(&mut Self, event : WlMsg<T>) -> Option<WlMsg<T>>;
+
+pub trait WlInterface<T> {
+    fn get_interface_id() -> WlInterfaceId;
+    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
+    fn parse_event(
+        msg : WireMessage<_>
+    ) -> Option<T>;
+    fn get_object_id(&self) -> WaylandId;
+}
+
+trait WlClient {
+    fn connect(socket_addr : &str) -> Result<Self>;
+    fn new_object<T : WlInterface<_>>(&mut self) -> T;
+    fn new_global<T : WlInterface<_>>(&mut self) -> T;
+
+    fn get_reference<T : WlInterface> (&self, object_id : u32) -> Option<T>;
+
+    fn get_reference<T : WlInterface> (&self, object_id : u32) -> Option<T>;
+    fn add_event_handler<T, E, F>(&mut self, object : &T, handler)
+        where 
+            T : WlInterface<E>
+            F : FnMut(&mut Self, event : WlMsg<E>) -> Option<WlMsg<E>>
+    ;
+}
+
+
+
+
+
+
+type WlMsg<E>    = (u32, E);
+type Consumed<T> = Option<T>;
+
+struct ObjectManager {
+    objects : Vec<ObjectEntry>
+}
+
+struct ObjectEntry {
+    object_id : WlObjectId, 
+    handlers  : 
+}
+
+
+
+
+
+
+
+//pub struct WlObjectMetaData {
+//    object_id: WaylandId,
+//    stream: Rc<dyn WaylandStream>,
+//}
+//
+//impl fmt::Debug for WlObjectMetaData {
+//    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//        f.debug_struct("WlObjectMetaData")
+//            .field("object_id", &self.object_id)
+//            .finish()
+//    }
+//}
+//
+//// #[derive(Debug, PartialEq, Eq)]
+//#[derive(Debug)]
+//pub enum WlEvent {
+//    WlDisplayError {
+//        object: WaylandId,
+//        code: u32,
+//        message: String,
+//    },
+//    WlDisplayDeleteId(WaylandId),
+//    WlRegistryGlobal {
+//        name: u32,
+//        interface: String,
+//        version: u32,
+//    },
+//    WlCallBackDone(u32),
+//    WlShmFormat(base::WlShmFormatValue),
+//    XdgSurfaceConfigure(u32),
+//    XdgTopLevelConfigure {
+//        width: i32,
+//        height: i32,
+//        states: Vec<xdg_shell::XdgTopLevelState>,
+//    },
+//    XdgTopLevelWmCapabilities(Vec<xdg_shell::XdgWmCapabilities>),
+//    WlSurfacePreferredBufferScale(u32),
+//    WlSurfacePreferredBufferTransform(base::WlOutputTransform),
+//    WlBufferRelease
+//}
+//
+//#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
+//pub enum WlInterfaceId {
+//    WlDisplay,
+//    WlRegistry,
+//    WlCallBack,
+//    WlCompositor,
+//    XdgWmBase,
+//    WlShm,
+//    WlSurface,
+//    WlShmPool,
+//    WlBuffer,
+//    XdgSurface,
+//    XdgTopLevel,
+//}
+
+
+type MockingHandler = dyn FnMut(RawMessage) -> StdResult<RawMessage, WlEventParseError>;
+struct WlObjectManager {
+    objects: HashMap<WaylandId, Vec<Box<MockingHandler>>>
+    objects_id_count: u32, 
+}
+
+impl WlObjectManager {
+    fn new() -> Self {
+        Self {
+            objects: HashMap::new(),
+            objects_id_count: 0,
+        }
+    }
+
+    // TODO: make this less type dependent
+    fn new_id<T: WaylandInterface>(&mut self) -> WaylandId {
+        assert!(self.objects_id_count < WaylandId::MAX);
+
+        self.objects_id_count += 1;
+        let object_id = self.objects_id_count;
+
+        assert!(
+            self.objects
+                .insert(
+                    object_id,
+                    (
+                        WlObjectInfo {
+                            event_parse_func: T::parse_event,
+                            interface_id: T::get_interface_id(),
+                        },
+                        None
+                    )
+                )
+                .is_none(),
+            "for object_id = {object_id}"
+        );
+        object_id
+    }

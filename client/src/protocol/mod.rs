@@ -3,6 +3,7 @@ use std::{fmt, rc::Rc, result::Result as StdResult};
 
 pub mod base;
 mod macros;
+pub mod v2;
 pub mod xdg_shell;
 
 #[allow(unused_imports)]
@@ -50,6 +51,19 @@ pub trait WaylandInterface {
     fn get_object_id(&self) -> WaylandId;
 }
 
+//pub struct RawMessage<'a> {
+//    pub object_id: WaylandId,
+//    pub event_id: WaylandId,
+//    pub payload: &'a [u8],
+//}
+//
+//pub trait WlInterface<T> {
+//    fn get_interface_id() -> WlNewInterfaceId;
+//    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
+//    fn parse_event(msg: RawMessage<'_>) -> Option<T>;
+//    fn get_object_id(&self) -> WlObjectId;
+//}
+
 pub struct WlObjectMetaData {
     object_id: WaylandId,
     stream: Rc<dyn WaylandStream>,
@@ -88,7 +102,7 @@ pub enum WlEvent {
     XdgTopLevelWmCapabilities(Vec<xdg_shell::XdgWmCapabilities>),
     WlSurfacePreferredBufferScale(u32),
     WlSurfacePreferredBufferTransform(base::WlOutputTransform),
-    WlBufferRelease
+    WlBufferRelease,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]

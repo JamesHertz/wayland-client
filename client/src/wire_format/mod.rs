@@ -46,7 +46,7 @@ impl WaylandStream for ClientStream {
     fn send(&self, msg: WireMessage<'_>) -> Result<usize> {
         // 128 bytes seems to be a good default. For what I've seen I think that
         // hardly any request will need so many bytes.
-        let mut buffer = Vec::with_capacity(128); 
+        let mut buffer = Vec::with_capacity(128);
 
         write_u32(&mut buffer, msg.object_id);
         write_u32(&mut buffer, 0); // will be filled in the end
@@ -67,6 +67,7 @@ impl WaylandStream for ClientStream {
                     let str_size = str_size as usize;
                     let aligned_size = str_aligned_size(str_size);
 
+                    // buffer.resize(aligned_size, 0u8)
                     for _ in 0..(aligned_size - str_size) {
                         buffer.push(0u8);
                     }
@@ -89,8 +90,8 @@ impl WaylandStream for ClientStream {
             )
         }
 
-        let size_and_event_id =
-            (total_size as u32) << 16 | msg.request_id as u32;
+        let size_and_event_id = (total_size as u32) << 16 | msg.request_id;
+        //(total_size as u32) << 16 | msg.request_id as u32;
         let bytes = size_and_event_id.to_ne_bytes();
         buffer[4..8].copy_from_slice(&bytes);
 
@@ -161,7 +162,7 @@ pub mod parsing {
         if size % 4 != 0 {
             return Err(fallback_error!(
                 "u32 array size (in bytes) '{size}' is not multiple of 32 bits."
-            ))
+            ));
         };
 
         let array_size = size / 4;
