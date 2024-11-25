@@ -22,16 +22,14 @@ type WlObjectId = WaylandId;
 pub struct WaylandClient<'a> {
     globals: HashMap<WlInterfaceId, WaylandId>,
     objects: WlObjectManager<'a>,
-    wl_stream: Rc<ClientStream>,
-    stream: UnixStream,
+    stream: Rc<ClientStream>,
+    socket: UnixStream,
     buffer: ByteBuffer,
 }
 
-//fn wrap_handler<E: 'static> (
-
 impl<'a> WaylandClient<'a> {
     pub fn connect(socket_path: &str) -> Result<Self, Error> {
-        let stream = error_context!(
+        let socket = error_context!(
             UnixStream::connect(dbg!(socket_path)),
             "Failed to establish connection."
         )?;
@@ -40,14 +38,23 @@ impl<'a> WaylandClient<'a> {
             objects: WlObjectManager::new(),
             globals: HashMap::new(),
             buffer: ByteBuffer::new(4 * 1024),
-            wl_stream: Rc::new(ClientStream::new(
-                stream.try_clone().expect("Unable to clone UnixStream"),
+            stream: Rc::new(ClientStream::new(
+                socket.try_clone().expect("Unable to clone UnixStream"),
             )),
-            stream,
+            socket,
         };
 
         let display: WlDisplay = client.new_global();
         assert!(display.get_object_id() == 1);
+
+        client.add_event_handler(&display, |client, msg| match msg.event {
+            WlDisplayEvent::Error {
+                object,
+                code,
+                message,
+            } => error!("Wayland error {code} for object {object}: {message:?}"), // TODO: add more context c: (display the object interface)
+            WlDisplayEvent::DeletedId(id) => client.objects.remove_object(id),
+        });
 
         let registry: WlRegistry = client.new_global();
         display.get_registry(&registry)?;
@@ -93,11 +100,10 @@ impl<'a> WaylandClient<'a> {
     pub fn new_object<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
         let object_id = self.objects.new_object(
             T::get_interface_id(),
-            // FIXME: make an WlEventMsg
             Box::new(|raw_msg| T::parse_msg(raw_msg).map(|value| value.to_any())),
         );
 
-        T::build(object_id, self.wl_stream.clone())
+        T::build(object_id, self.stream.clone())
     }
 
     pub fn get_global<E, T: WlInterface<Event = E>>(&self) -> Option<T> {
@@ -107,7 +113,7 @@ impl<'a> WaylandClient<'a> {
     pub fn get_reference<E, T: WlInterface<Event = E>>(&self, object_id: u32) -> Option<T> {
         match self.objects.get_object_interface(object_id) {
             Some(interface_id) if interface_id == T::get_interface_id() => {
-                Some(T::build(object_id, self.wl_stream.clone()))
+                Some(T::build(object_id, self.stream.clone()))
             }
             _ => None,
         }
@@ -161,7 +167,7 @@ impl<'a> WaylandClient<'a> {
             let msg = match self.next_msg() {
                 Ok(msg) => msg,
                 Err(err) => {
-                    error!("Got error {err:#?} reading message!");
+                    error!("Reading message from the wire: {err:#?}!");
                     continue;
                 }
             };
@@ -220,7 +226,7 @@ impl<'a> WaylandClient<'a> {
     }
 
     fn read_bytes(&mut self, size: usize) -> Result<&[u8], Error> {
-        self.buffer.read_bytes(size, &mut self.stream)
+        self.buffer.read_bytes(size, &mut self.socket)
     }
 }
 
@@ -324,9 +330,12 @@ impl<'a> WlObjectManager<'a> {
             interface_id: entry.interface_id,
         })
     }
+
+    fn remove_object(&mut self, object_id: WaylandId) {
+        self.objects.remove(&object_id);
+    }
 }
 
-// TODO: review this implementation later
 pub struct ByteBuffer {
     data: Box<[u8]>,
     head: usize,
