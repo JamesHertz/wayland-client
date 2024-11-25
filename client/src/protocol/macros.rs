@@ -38,7 +38,7 @@ macro_rules! declare_interface {
     };
 
     (
-        @name($name : ident), 
+        @name($name : ident),
         @events($object_id : ident, $iter_name : ident) {
             $( $parse_event : tt)+
         }

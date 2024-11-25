@@ -85,9 +85,7 @@ impl WaylandStream for ClientStream {
 
         let total_size = buffer.len();
         if total_size % 4 != 0 {
-            panic!(
-                "Bug, the total size ({total_size}) of message {msg:?} isn't a multiple of 32 bits"
-            )
+            panic!("Bug, the total size ({total_size}) of message {msg:?} isn't a multiple of 32 bits")
         }
 
         let size_and_event_id = (total_size as u32) << 16 | msg.request_id;
@@ -102,10 +100,9 @@ impl WaylandStream for ClientStream {
             let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
             ancillary.add_fds(&[fd][..]);
 
-            self.0.borrow_mut().send_vectored_with_ancillary(
-                &[IoSlice::new(&buffer)][..],
-                &mut ancillary,
-            )
+            self.0
+                .borrow_mut()
+                .send_vectored_with_ancillary(&[IoSlice::new(&buffer)][..], &mut ancillary)
         } else {
             self.0.borrow_mut().write(&buffer)
         };
@@ -151,11 +148,8 @@ pub mod parsing {
         Ok(parse_u32(iter)? as i32)
     }
 
-    pub fn parse_u32_array(
-        iter: &mut impl Iterator<Item = u8>,
-    ) -> Result<Vec<u32>> {
-        let size =
-            error_context!(parse_u32(iter), "Failed to get u32 array size")?;
+    pub fn parse_u32_array(iter: &mut impl Iterator<Item = u8>) -> Result<Vec<u32>> {
+        let size = error_context!(parse_u32(iter), "Failed to get u32 array size")?;
 
         // FIXME: remove this condition and start checking if all the messages/events
         // payload size (in bytes) are multiple or 32 bits
@@ -180,13 +174,10 @@ pub mod parsing {
     }
 
     pub fn parse_str(iter: &mut impl Iterator<Item = u8>) -> Result<String> {
-        let str_size =
-            error_context!(parse_u32(iter), "Failed to get String size.")?
-                as usize;
+        let str_size = error_context!(parse_u32(iter), "Failed to get String size.")? as usize;
 
-        let str_data = next_n_bytes(iter, str_size).ok_or(fallback_error!(
-            "Failed to get {str_size} bytes for str data."
-        ))?;
+        let str_data = next_n_bytes(iter, str_size)
+            .ok_or(fallback_error!("Failed to get {str_size} bytes for str data."))?;
 
         let result = error_context!(
             str::from_utf8(&str_data[..str_size - 1]),
@@ -202,10 +193,7 @@ pub mod parsing {
         Ok(result.to_string())
     }
 
-    fn next_n_bytes(
-        iter: &mut impl Iterator<Item = u8>,
-        items: usize,
-    ) -> Option<Vec<u8>> {
+    fn next_n_bytes(iter: &mut impl Iterator<Item = u8>, items: usize) -> Option<Vec<u8>> {
         let mut values = Vec::with_capacity(items);
 
         for _ in 0..items {

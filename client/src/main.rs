@@ -13,7 +13,7 @@ use std::{
 
 use client::{
     client::WaylandClient,
-    protocol::{base::*, xdg_shell::*, WaylandInterface},
+    protocol::{base::*, xdg_shell::*},
     Result,
 };
 
@@ -24,6 +24,8 @@ fn main() -> Result<()> {
 
     let client = WaylandClient::connect(&utils::wayland_sockpath())?;
     info!("Initialization completed!");
+
+    client.event_loop();
 
     //let width = 1920;
     //let height = 1080;
