@@ -27,6 +27,7 @@ fn main() -> Result<()> {
 
     client.event_loop();
 
+    Ok(())
     //let width = 1920;
     //let height = 1080;
     //let stride = 4 * width; // size of a line
@@ -73,7 +74,8 @@ fn main() -> Result<()> {
     //surface.attach(&buffer, 0, 0)?;
     //surface.commit()?;
 
-    client.event_loop()
+    //client.event_loop();
+
 
     // TODO:
     //  - get a window on the screen

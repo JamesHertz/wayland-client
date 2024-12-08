@@ -125,6 +125,23 @@ impl WlDisplay {
             values: &[Uint32(registry.get_object_id())],
         })
     }
+
+    pub fn sync(&self, callback: &WlCallBack) -> error::Result<usize> {
+        debug!(
+            "{} @ WlDisplay -> sync ( {} )",
+            //self.get_object_id(),
+            Self::get_interface_id(),
+            callback.get_object_id()
+        );
+
+        self.0.stream.send(WireMessage {
+            object_id: self.get_object_id(),
+            request_id: 0,
+            values: &[Uint32(callback.get_object_id())],
+        })
+    }
+
+
 }
 
 impl WlRegistry {
@@ -148,23 +165,59 @@ impl WlRegistry {
     }
 }
 
-pub struct WlCompositor;
-pub struct XdgWmBase;
-pub struct WlShm;
+pub struct WlCallBack(WlObjectMetaData);
+
+#[derive(Debug)]
+pub struct WlCallBackDone (u32);
+
+impl WlInterface for WlCallBack {
+    type Event = WlCallBackDone;
+
+    fn get_object_id(&self) -> WaylandId {
+        self.0.object_id
+    }
+
+    fn get_interface_id() -> WlInterfaceId {
+        2
+    }
+
+    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self {
+        Self(WlObjectMetaData { object_id, stream })
+    }
+
+    fn parse_event(
+        object_id: WaylandId,
+        event_id: WlEventId,
+        iter: &mut impl Iterator<Item = u8>,
+    ) -> Result<Self::Event, WlEventParseError> {
+        if event_id == 0 {
+            let data = parser::parse_u32(iter)?;
+
+            debug!("{object_id} @ WlCallBack <- done ( {data} )");
+            Ok(WlCallBackDone(data))
+        } else {
+            Err(WlEventParseError::NoEvent(event_id))
+        }
+    }
+}
+
+pub struct WlCompositor(u32);
+pub struct XdgWmBase(u32);
+pub struct WlShm(u32);
 
 impl WlInterface for WlCompositor {
     type Event = ();
 
     fn get_object_id(&self) -> WaylandId {
-        todo!()
+        self.0
     }
 
     fn get_interface_id() -> WlInterfaceId {
-        todo!()
+        3
     }
 
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self {
-        todo!()
+        Self(object_id)
     }
 
     fn parse_event(
@@ -180,15 +233,15 @@ impl WlInterface for XdgWmBase {
     type Event = ();
 
     fn get_object_id(&self) -> WaylandId {
-        todo!()
+        self.0
     }
 
     fn get_interface_id() -> WlInterfaceId {
-        todo!()
+        4
     }
 
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self {
-        todo!()
+        Self(object_id)
     }
 
     fn parse_event(
@@ -204,15 +257,15 @@ impl WlInterface for WlShm {
     type Event = ();
 
     fn get_object_id(&self) -> WaylandId {
-        todo!()
+        self.0
     }
 
     fn get_interface_id() -> WlInterfaceId {
-        todo!()
+        5
     }
 
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self {
-        todo!()
+        Self(object_id)
     }
 
     fn parse_event(
@@ -223,6 +276,33 @@ impl WlInterface for WlShm {
         todo!()
     }
 }
+
+
+
+/*
+
+declare_interfaces {
+    interface {
+        @name(WlDisplay),
+        @requests {
+            sync(callback : &WlCallBack) => [
+                Uint32(callback.get_object_id())
+            ],
+            get_registry(registry : &WlRegistry) => [
+                Uint32(registry.get_object_id())
+            ],
+        }
+        @events(WlDisplayEvent, object_id, iter) {
+            display_error(object : u32, code : u32, message : String),
+            delete_id(object : u32)
+        }
+    }
+
+}
+
+
+
+*/
 
 //declare_interface!(
 //    @name(WlDisplay),

@@ -2,8 +2,7 @@
 pub mod memory;
 
 use std::{
-    any::Any, collections::HashMap, io::Read, os::unix::net::UnixStream, process, rc::Rc,
-    result::Result as StdResult,
+    any::Any, cell::RefCell, collections::HashMap, io::Read, os::unix::net::UnixStream, process, rc::Rc, result::Result as StdResult
 };
 
 use crate::{
@@ -12,10 +11,8 @@ use crate::{
     wire_format::{ClientStream, WireMsgHeader},
 };
 
-use log::{debug, error, info, trace, warn};
-
 use memory::SharedBuffer;
-use {RawMessage, WlEventParseError};
+use log::{debug, error, info, trace, warn};
 
 type WlEventId = WaylandId;
 type WlObjectId = WaylandId;
@@ -44,66 +41,8 @@ impl<'a> WaylandClient<'a> {
             socket,
         };
 
-        let display: WlDisplay = client.new_global();
-        assert!(display.get_object_id() == 1);
-
-        client.add_event_handler(&display, |client, msg| match msg.event {
-            WlDisplayEvent::Error {
-                object,
-                code,
-                message,
-            } => error!("Wayland error {code} for object {object}: {message:?}"), // TODO: add more context c: (display the object interface)
-            WlDisplayEvent::DeletedId(id) => client.objects.remove_object(id),
-        });
-
-        let registry: WlRegistry = client.new_global();
-        display.get_registry(&registry)?;
-
-        client.add_event_handler(&registry, |client, msg| {
-            let WlRegistryEvent::Global {
-                name,
-                interface,
-                version,
-            } = msg.event;
-
-            let object_id = match interface.as_str() {
-                "wl_compositor" => client.new_global_id::<(), WlCompositor>(),
-                "xdg_wm_base" => client.new_global_id::<(), XdgWmBase>(),
-                "wl_shm" => client.new_global_id::<(), WlShm>(),
-                _ => return,
-            };
-
-            info!("Mapping {interface} to global");
-            let registry: WlRegistry = client.get_global().unwrap();
-            registry.bind(name, interface, version, object_id).unwrap(); // TODO: add proper error message
-        })?;
-
+        client.init_globals()?;
         Ok(client)
-    }
-
-    #[inline(always)]
-    fn new_global_id<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> WaylandId {
-        self.new_global::<E, T>().get_object_id()
-    }
-
-    fn new_global<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
-        let object: T = self.new_object();
-        assert!(
-            self.globals
-                .insert(T::get_interface_id(), object.get_object_id())
-                .is_none(),
-            "Creating global twice :c"
-        );
-        object
-    }
-
-    pub fn new_object<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
-        let object_id = self.objects.new_object(
-            T::get_interface_id(),
-            Box::new(|raw_msg| T::parse_msg(raw_msg).map(|value| value.to_any())),
-        );
-
-        T::build(object_id, self.stream.clone())
     }
 
     pub fn get_global<E, T: WlInterface<Event = E>>(&self) -> Option<T> {
@@ -144,6 +83,19 @@ impl<'a> WaylandClient<'a> {
         )
     }
 
+    pub fn event_loop(mut self)  {
+        loop  {
+             match self.next_msg() {
+                Err(err) => error!("Reading message from the wire: {err:#?}!"),
+                Ok(msg) => {
+                    if let Err(err) = self.handle_msg(msg) {
+                        warn!("Error handling message message: {err:?}")
+                    }
+                }
+            }
+        }
+    }
+
     //pub fn create_pool(
     //    &mut self,
     //    size: i32,
@@ -161,44 +113,103 @@ impl<'a> WaylandClient<'a> {
     //    Ok((pool, buffer))
     //}
 
-    // TODO: make it so that this method returns when you get a quit from window manager
-    pub fn event_loop(mut self) -> ! {
-        loop {
-            let msg = match self.next_msg() {
-                Ok(msg) => msg,
-                Err(err) => {
-                    error!("Reading message from the wire: {err:#?}!");
-                    continue;
-                }
+    fn init_globals(&mut self) -> Result<(), Error> {
+        let display: WlDisplay = self.new_global();
+        assert!(display.get_object_id() == 1);
+
+        self.add_event_handler(&display, |client, msg| match msg.event {
+            WlDisplayEvent::Error {
+                object,
+                code,
+                message,
+            } => error!("Wayland error {code} for object {object}: {message:?}"), // TODO: add more context c: (display the object interface)
+            WlDisplayEvent::DeletedId(id) => client.objects.remove_object(id),
+        });
+
+        let registry : WlRegistry = self.new_global();
+        display.get_registry(&registry)?;
+
+        self.add_event_handler(&registry, |client, msg| {
+            let WlRegistryEvent::Global {
+                name,
+                interface,
+                version,
+            } = msg.event;
+
+            let object_id = match interface.as_str() {
+                "wl_compositor" => client.new_global_id::<(), WlCompositor>(),
+                "xdg_wm_base" => client.new_global_id::<(), XdgWmBase>(),
+                "wl_shm" => client.new_global_id::<(), WlShm>(),
+                _ => return,
             };
 
-            let object_id = msg.object_id;
-            let event_id = msg.event_id;
-            let (mut handler, interface_id, msg) = {
-                let Some(mut entry) = self.objects.get_object_entry_copy(msg.object_id) else {
-                    error!("Received message to an non-existant object: {}", msg.object_id);
-                    continue;
-                };
+            info!("Mapping {interface} to global");
+            let registry: WlRegistry = client.get_global().unwrap();
+            registry.bind(name, interface, version, object_id).unwrap(); // TODO: add proper error message
+        })?;
 
-                let msg = match (entry.parser)(msg) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        error!("Parsing event {event_id} of object {object_id} @ ...");
-                        continue;
-                    }
-                };
+        let callback : WlCallBack = self.new_object();
+        display.sync(&callback)?;
 
-                (entry.handler.take(), entry.interface_id, msg)
-            };
-
-            match handler {
-                None => warn!("No handler for event {event_id} of object {object_id}"),
-                Some(mut handler) => {
-                    handler(&mut self, msg);
-                    self.objects.add_handler(object_id, interface_id, handler); // try to restore handler
-                }
-            }
+        let completed = Rc::new(RefCell::new(false));
+        {
+            let flag = Rc::clone(&completed);
+            self.add_event_handler(&callback, move |_, _| {
+                *flag.borrow_mut() = true;
+            });
         }
+
+        while !*completed.borrow() {
+            let msg = self.next_msg()?;
+            self.handle_msg(msg)?;
+        }
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn new_global_id<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> WaylandId {
+        self.new_global::<E, T>().get_object_id()
+    }
+
+    fn new_global<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
+        let object: T = self.new_object();
+        assert!(
+            self.globals
+                .insert(T::get_interface_id(), object.get_object_id())
+                .is_none(),
+            "Creating global twice :c"
+        );
+        object
+    }
+
+    pub fn new_object<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
+        let object_id = self.objects.new_object(
+            T::get_interface_id(),
+            Box::new(|raw_msg| T::parse_msg(raw_msg).map(|value| value.to_any())),
+        );
+
+        T::build(object_id, self.stream.clone())
+    }
+
+    fn handle_msg(&mut self, msg: RawMessage) -> Result<(), Error> {
+        let object_id = msg.object_id;
+        let event_id = msg.event_id;
+        
+        let mut entry = self.objects.get_object_entry_copy(msg.object_id).ok_or_else(|| {
+            fallback_error!("Received message to an non-existant object: {object_id}")
+        })?;
+
+        // TODO: add a few methods for the type entry c: (like parse and take c:)
+        let msg = (entry.parser)(msg)?;
+        let interface_id = entry.interface_id;
+        let mut handler = entry.handler.take().ok_or_else(|| {
+            fallback_error!("No handler for event {event_id} of object {object_id}")
+        })?;
+
+        handler(self, msg);
+        self.objects.add_handler(object_id, interface_id, handler); // try to restore handler
+        Ok(())
     }
 
     fn next_msg(&mut self) -> Result<RawMessage, Error> {
