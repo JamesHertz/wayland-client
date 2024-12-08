@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     xdg_top_level.set_title("Black Space")?;
 
     client.add_event_handler(&xdg_top_level, |_, msg| {
-        if let XdgTopLevelEvent::Close{} = msg.event {
+        if let XdgTopLevelEvent::Close = msg.event {
             info!("Closing window");
             process::exit(0);
         }

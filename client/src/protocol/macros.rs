@@ -90,9 +90,9 @@ macro_rules! declare_interfaces {
     (@next_request $id : expr, ) => {}; 
     (@events $t : tt ) => { }; 
     (@events $event_type : ident, 
-             $($event_name : ident $(
-                     ($($arg : ident $t : tt $type : ty),*)
-             )?);+ $(;)?
+             $($event_name : ident (
+                     $($($arg : ident $t : tt $type : ty),+)?
+             ));+ $(;)?
     ) => { 
         paste::paste! {
             #[derive(Debug)]
