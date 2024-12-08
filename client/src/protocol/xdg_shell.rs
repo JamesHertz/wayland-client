@@ -1,110 +1,61 @@
 //use super::base::WlSurface;
-use super::*;
-use crate::{
-    error::{self, fallback_error},
-    wire_format::parsing as parser,
-};
-use log::debug;
-use std::{convert::TryFrom, result::Result as StdResult};
 
-//declare_interface!(XdgWmBase);
-//declare_interface!(
-//    @name(XdgSurface),
-//    @events(obj_id, iter) {
-//        0 => {
-//            let serial_nr = parser::parse_u32(&mut iter)?;
-//
-//            debug!(
-//                "{obj_id} @ {:?} <- configure ( {serial_nr} )",
-//                Self::get_interface_id()
-//            );
-//
-//            XdgSurfaceConfigure( serial_nr )
-//        }
-//
-//    }
-//);
-//
-//declare_interface!(
-//    @name(XdgTopLevel),
-//    @events(obj_id, iter) {
-//        0 => {
-//            let (width, height, states) = (
-//                parser::parse_i32(&mut iter)?,
-//                parser::parse_i32(&mut iter)?,
-//                parser::parse_u32_array(&mut iter)?
-//                            .into_iter()
-//                            .map(u32::try_into)
-//                            .collect::<Result<_>>()?
-//            );
-//
-//            debug!(
-//                "{obj_id} @ {:?} <- configure ( {width}, {height}, {states:?} )",
-//                Self::get_interface_id()
-//            );
-//
-//            XdgTopLevelConfigure {
-//                width, height, states
-//            }
-//        },
-//
-//        3 => {
-//            let capabilities =  parser::parse_u32_array(&mut iter)?
-//                        .into_iter()
-//                        .map(u32::try_into)
-//                        .collect::<Result<_>>()?;
-//            debug!(
-//                "{obj_id} @ {:?} <- wm_capabilities ( {capabilities:?} )",
-//                Self::get_interface_id()
-//            );
-//
-//            XdgTopLevelWmCapabilities( capabilities )
-//        }
-//    }
-//);
-//
-//impl XdgWmBase {
-//    pub fn get_xdg_surface(
-//        &self,
-//        new_surface: &XdgSurface,
-//        created_surface: &WlSurface,
-//    ) -> Result<usize> {
-//        debug!(
-//            "{} @ {:?} -> get_xdg_surface( {}, {} )",
-//            self.get_object_id(),
-//            Self::get_interface_id(),
-//            new_surface.get_object_id(),
-//            created_surface.get_object_id()
-//        );
-//
-//        self.0.stream.send(WireMessage {
-//            object_id: self.get_object_id(),
-//            request_id: 2,
-//            values: &[
-//                Uint32(new_surface.get_object_id()),
-//                Uint32(created_surface.get_object_id()),
-//            ],
-//        })
-//    }
-//}
-//
-//impl XdgSurface {
-//    pub fn get_top_level(&self, new_role: &XdgTopLevel) -> Result<usize> {
-//        debug!(
-//            "{} @ {:?} -> get_top_level ( {} )",
-//            self.get_object_id(),
-//            Self::get_interface_id(),
-//            new_role.get_object_id(),
-//        );
-//
-//        self.0.stream.send(WireMessage {
-//            object_id: self.get_object_id(),
-//            request_id: 1,
-//            values: &[Uint32(new_role.get_object_id())],
-//        })
-//    }
-//}
-//
+use super::macros::declare_interfaces;
+use super::base::WlSurface;
+
+declare_interfaces! {
+    FirstId = 100,
+    XdgPositioner,
+    XdgPopUp,
+
+    @interface(XdgSurface) {
+        @requests {
+            destroy();
+            get_toplevel(top_level : &XdgTopLevel) => [ Uint32(top_level.get_object_id()) ];
+            get_popup(popup : &XdgPopUp, parent : &XdgSurface, positioner : &XdgPositioner) => [ 
+                Uint32(popup.get_object_id()), Uint32(parent.get_object_id()), Uint32(positioner.get_object_id()),
+            ];
+
+            set_window_geometry(x: i32, y: i32, width: i32, height: i32) => [ 
+                Int32(x), Int32(y), Int32(width), Int32(height)
+            ];
+            ack_configure(serial: u32) => [ Uint32( serial ) ];
+        }
+        @events { configure( serial_nr : u32); }
+    },
+
+    @interface(XdgTopLevel) {
+        @requests {
+            destroy();
+            set_parent(parent : &XdgTopLevel) => [ Uint32(parent.get_object_id()) ];
+            set_title(title: &str)   => [ Str(title.to_string()) ];
+            set_app_id(app_id: &str) => [ Str(app_id.to_string()) ];
+        }
+
+        @events {
+            configure(height : i32, width: i32, states : Array);
+            close();
+            configure_bounds(width: i32, height: i32);
+            wm_capabilities(capabilities: Array);
+        }
+
+    },
+
+    @interface(XdgWmBase) {
+        @requests {
+            destroy();
+            create_positioner(positioner : &XdgPositioner) => [ Uint32(positioner.get_object_id()) ];
+            get_xdg_surface( xdg_surface: &XdgSurface, surface: &WlSurface) => [
+                Uint32(xdg_surface.get_object_id()), Uint32(surface.get_object_id())
+            ];
+            pong(serial : u32) => [ Uint32(serial) ];
+        }
+
+        @events { ping(serial : u32); }
+    }
+
+}
+
 //#[derive(Debug)]
 //pub enum XdgWmCapabilities {
 //    WindowMenu = 1,
@@ -112,7 +63,7 @@ use std::{convert::TryFrom, result::Result as StdResult};
 //    Fullscreen = 3,
 //    Minimize = 4,
 //}
-//
+
 //impl TryFrom<u32> for XdgWmCapabilities {
 //    type Error = error::Error;
 //
@@ -128,7 +79,7 @@ use std::{convert::TryFrom, result::Result as StdResult};
 //        })
 //    }
 //}
-//
+
 //#[derive(Debug)]
 //pub enum XdgTopLevelState {
 //    Maximized = 1,
@@ -141,7 +92,7 @@ use std::{convert::TryFrom, result::Result as StdResult};
 //    TiledBottom = 8,
 //    Suspended = 9,
 //}
-//
+
 //impl TryFrom<u32> for XdgTopLevelState {
 //    type Error = error::Error;
 //
@@ -161,53 +112,4 @@ use std::{convert::TryFrom, result::Result as StdResult};
 //            }
 //        })
 //    }
-//}
-//
-//
-//impl XdgTopLevel {
-//    pub fn set_title(&self, title: &str) -> Result<usize> {
-//        debug!(
-//            "{} @ {:?} -> set_title( {title:?} )",
-//            self.get_object_id(),
-//            Self::get_interface_id(),
-//        );
-//
-//        self.0.stream.send(WireMessage {
-//            object_id: self.get_object_id(),
-//            request_id: 2,
-//            values: &[Str(title.to_string())],
-//        })
-//    }
-//
-//    pub fn set_app_id(&self, app_id: &str) -> Result<usize> {
-//        debug!(
-//            "{} @ {:?} -> set_app_id( {app_id:?} )",
-//            self.get_object_id(),
-//            Self::get_interface_id(),
-//        );
-//
-//        self.0.stream.send(WireMessage {
-//            object_id: self.get_object_id(),
-//            request_id: 3,
-//            values: &[Str(app_id.to_string())],
-//        })
-//    }
-//}
-//
-//
-//impl XdgSurface {
-//    pub fn ack_configure(&self, serial_nr : u32) -> Result<usize> {
-//        debug!(
-//            "{} @ {:?} -> ack_configure( {serial_nr} )",
-//            self.get_object_id(),
-//            Self::get_interface_id()
-//        );
-//
-//        self.0.stream.send( WireMessage {
-//            object_id  : self.get_object_id(),
-//            request_id : 4,
-//            values: &[ Uint32(serial_nr) ]
-//        })
-//    }
-//
 //}

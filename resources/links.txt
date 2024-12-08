@@ -3,3 +3,4 @@
 -> Wayland docs - https://wayland.freedesktop.org/docs/html/apa.html
 -> Wayland docs 2.0 - https://wayland.app/protocols/wayland
 -> Cargo build script - https://doc.rust-lang.org/cargo/reference/build-scripts.html
+-> Rust book on macros - https://danielkeep.github.io/tlborm/book/README.html

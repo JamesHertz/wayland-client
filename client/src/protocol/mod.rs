@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::error;
-use std::{any::Any, fmt, rc::Rc};
+use std::{any::Any, fmt::{self, format, Display}, rc::Rc};
 
 pub mod base;
 mod macros;
@@ -10,14 +10,15 @@ pub mod xdg_shell;
 pub use self::WireValue::*;
 
 #[allow(unused_imports)]
-use macros::declare_interface;
+use macros::declare_interfaces;
 
 pub type WlInterfaceId = u32;
 pub type WaylandId = u32;
 pub type WlEventId = u16;
+pub type Array = Vec<u32>;
 //pub type EventParseResult<T> = Result<T, EventParseError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WireValue {
     Uint32(u32),
     Int32(i32),
@@ -25,6 +26,19 @@ pub enum WireValue {
     Array(Vec<u8>),
     FileDesc(i32),
 }
+
+impl fmt::Display for WireValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Uint32(v)    => write!(f, "{v}"),
+            Int32(v)     => write!(f, "{v}"),
+            Str(v)    => write!(f, "{v:?}"),
+            Array(v) => write!(f, "{v:?}"),
+            FileDesc(v)  => write!(f, "{v}"),
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct WireMessage<'a> {
@@ -74,7 +88,11 @@ pub trait WlInterface {
 
     fn get_object_id(&self) -> WaylandId;
     fn get_interface_id() -> WlInterfaceId;
+    fn get_display_name() -> &'static str { "" }
+
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
+
+
     fn parse_event(
         object_id: WaylandId,
         event_id: WlEventId,
