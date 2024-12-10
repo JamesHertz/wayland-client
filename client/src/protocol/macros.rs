@@ -2,7 +2,7 @@ use std::fmt;
 /// Syntax in BNF format:
 /// ```
 /// "declare_interfaces!" "{"
-///    "FirstId" "=" <first-interface-id-value> ","
+///    "@FirstId" "=" <first-interface-id-value> ","
 ///    (<empty-interface-name>",")* // interfaces with no events or requests
 ///    ( "@interface" "(" <interface-name> ")" "{"
 ///        (
@@ -22,7 +22,7 @@ use std::fmt;
 /// ```
 macro_rules! declare_interfaces {
     {  
-       FirstId = $start : expr,
+       @FirstId = $start : expr,
        $($skeleton : ident),* 
        $($(,)? @interface($name: ident) $({
             $(@requests {
@@ -104,8 +104,14 @@ macro_rules! declare_interfaces {
         }
     };
 
-    (@decl $name : ident, $event_type : ident, $($type_def: tt)+) => {
-        declare_interfaces!(@events $event_type , $($type_def)+);
+    (@decl $name : ident ) => {
+        declare_interfaces!(@decl $name, EmptyEvent);
+    };
+
+    (@decl $name : ident, $event_type : ident $(, $($type_def: tt)+)?) => {
+        $(
+            declare_interfaces!(@events $event_type, $($type_def)+);
+        )?
 
         #[derive(Clone)]
         pub struct $name(WlObjectMetaData); 
@@ -134,7 +140,7 @@ macro_rules! declare_interfaces {
                 event_id: WlEventId,
                 iter: &mut impl Iterator<Item = u8>,
             ) -> Result<Self::Event, WlEventParseError> {
-                declare_interfaces!(@next_event object_id, event_id, iter, 0, $($type_def)+);
+                $( declare_interfaces!(@next_event object_id, event_id, iter, 0, $($type_def)+); )?
                 Err(WlEventParseError::NoEvent(event_id))
             }
         }
@@ -182,45 +188,10 @@ macro_rules! declare_interfaces {
     };
 
     (@parse_arg $other : ty, $iter : ident) => {
-        compile_error!("Events arguments types should be either 'u32', 'String', 'i32' or 'Vec<u32>'");
+        compile_error!("Events arguments types should be either 'u32', 'String', 'i32' or 'Array'");
     };
 
     (@next_event $obj_id : ident, $event_id : ident, $iter : ident, $id : expr, ) => { };
-
-    (@decl $name : ident ) => {
-        // TODO: remove duplication
-        #[derive(Clone)]
-        pub struct $name(WlObjectMetaData); 
-        impl WlInterface for $name {
-
-            type Event = ();
-
-            fn get_object_id(&self) -> WaylandId {
-                self.0.object_id
-            }
-
-            fn get_interface_id() -> WlInterfaceId {
-                WlIds::$name as WlInterfaceId
-            }
-
-            fn build(object_id: WaylandId, stream: std::rc::Rc<dyn WaylandStream>) -> Self {
-                Self(WlObjectMetaData { object_id, stream })
-            }
-
-            fn get_display_name() -> &'static str {
-                stringify!($name)
-            }
-
-            fn parse_event(
-                object_id: WaylandId,
-                event_id: WlEventId,
-                iter: &mut impl Iterator<Item = u8>,
-            ) -> Result<Self::Event, WlEventParseError> {
-                Err(WlEventParseError::NoEvent(event_id))
-            }
-        }
-    };
-
 }
 
 pub(super) use declare_interfaces;

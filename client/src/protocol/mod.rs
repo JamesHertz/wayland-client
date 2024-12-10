@@ -16,6 +16,7 @@ pub type WlInterfaceId = u32;
 pub type WaylandId = u32;
 pub type WlEventId = u16;
 pub type Array = Vec<u32>;
+pub type EmptyEvent = ();
 
 #[derive(Debug, Clone)]
 pub enum WireValue {

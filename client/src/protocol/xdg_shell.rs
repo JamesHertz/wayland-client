@@ -4,7 +4,7 @@ use super::macros::declare_interfaces;
 use super::base::WlSurface;
 
 declare_interfaces! {
-    FirstId = 100,
+    @FirstId = 100,
     XdgPositioner,
     XdgPopUp,
 
@@ -15,7 +15,6 @@ declare_interfaces! {
             get_popup(popup : &XdgPopUp, parent : &XdgSurface, positioner : &XdgPositioner) => [ 
                 Uint32(popup.get_object_id()), Uint32(parent.get_object_id()), Uint32(positioner.get_object_id()),
             ];
-
             set_window_geometry(x: i32, y: i32, width: i32, height: i32) => [ 
                 Int32(x), Int32(y), Int32(width), Int32(height)
             ];
@@ -38,14 +37,13 @@ declare_interfaces! {
             configure_bounds(width: i32, height: i32);
             wm_capabilities(capabilities: Array);
         }
-
     },
 
     @interface(XdgWmBase) {
         @requests {
             destroy();
             create_positioner(positioner : &XdgPositioner) => [ Uint32(positioner.get_object_id()) ];
-            get_xdg_surface( xdg_surface: &XdgSurface, surface: &WlSurface) => [
+            get_xdg_surface(xdg_surface: &XdgSurface, surface: &WlSurface) => [
                 Uint32(xdg_surface.get_object_id()), Uint32(surface.get_object_id())
             ];
             pong(serial : u32) => [ Uint32(serial) ];

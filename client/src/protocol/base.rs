@@ -1,7 +1,7 @@
 use super::declare_interfaces;
 
 declare_interfaces !{
-    FirstId = 0,
+    @FirstId = 0,
     WlRegion,
 
     @interface(WlCallBack) { @events { done(data : u32); } },
