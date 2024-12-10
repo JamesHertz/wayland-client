@@ -16,7 +16,6 @@ pub type WlInterfaceId = u32;
 pub type WaylandId = u32;
 pub type WlEventId = u16;
 pub type Array = Vec<u32>;
-//pub type EventParseResult<T> = Result<T, EventParseError>;
 
 #[derive(Debug, Clone)]
 pub enum WireValue {
@@ -39,7 +38,6 @@ impl fmt::Display for WireValue {
     }
 }
 
-
 #[derive(Debug)]
 pub struct WireMessage<'a> {
     pub object_id: WaylandId,
@@ -52,12 +50,6 @@ pub struct WireMessage<'a> {
 pub trait WaylandStream {
     fn send(&self, msg: WireMessage) -> Result<usize, error::Error>;
 }
-
-//#[derive(Debug)]
-//pub enum WlEventParseError {
-//    NoSuchEvent,
-//    ParsingError(String),
-//}
 
 // TODO: fix this later
 pub struct RawMessage {
@@ -92,7 +84,6 @@ pub trait WlInterface {
 
     fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
 
-
     fn parse_event(
         object_id: WaylandId,
         event_id: WlEventId,
@@ -116,6 +107,7 @@ pub trait WlInterface {
     }
 }
 
+#[derive(Clone)]
 pub struct WlObjectMetaData {
     object_id: WaylandId,
     stream: Rc<dyn WaylandStream>,
@@ -148,64 +140,3 @@ impl fmt::Display for WlEventParseError {
         write!(f, "{self:?}")
     }
 }
-
-//pub trait WaylandInterface {
-//    fn get_interface_id() -> WlInterfaceId;
-//    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
-//    fn parse_event(
-//        object_id: WaylandId,
-//        event_id: WaylandId,
-//        payload: &[u8],
-//    ) -> EventParseResult<WlEvent>;
-//    fn get_object_id(&self) -> WaylandId;
-//}
-
-//pub trait WlInterface<T> {
-//    fn get_interface_id() -> WlNewInterfaceId;
-//    fn build(object_id: WaylandId, stream: Rc<dyn WaylandStream>) -> Self;
-//    fn parse_event(msg: RawMessage<'_>) -> Option<T>;
-//    fn get_object_id(&self) -> WlObjectId;
-//}
-
-// #[derive(Debug, PartialEq, Eq)]
-// #[derive(Debug)]
-//pub enum WlEvent {
-//    WlDisplayError {
-//        object: WaylandId,
-//        code: u32,
-//        message: String,
-//    },
-//    WlDisplayDeleteId(WaylandId),
-//    WlRegistryGlobal {
-//        name: u32,
-//        interface: String,
-//        version: u32,
-//    },
-//    WlCallBackDone(u32),
-//    WlShmFormat(base::WlShmFormatValue),
-//    XdgSurfaceConfigure(u32),
-//    XdgTopLevelConfigure {
-//        width: i32,
-//        height: i32,
-//        states: Vec<xdg_shell::XdgTopLevelState>,
-//    },
-//    XdgTopLevelWmCapabilities(Vec<xdg_shell::XdgWmCapabilities>),
-//    WlSurfacePreferredBufferScale(u32),
-//    WlSurfacePreferredBufferTransform(base::WlOutputTransform),
-//    WlBufferRelease,
-//}
-
-//#[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
-//pub enum WlInterfaceId {
-//    WlDisplay,
-//    WlRegistry,
-//    WlCallBack,
-//    WlCompositor,
-//    XdgWmBase,
-//    WlShm,
-//    WlSurface,
-//    WlShmPool,
-//    WlBuffer,
-//    XdgSurface,
-//    XdgTopLevel,
-//}

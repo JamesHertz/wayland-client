@@ -1,29 +1,21 @@
 use memmap::{MmapMut, MmapOptions};
 use std::{
-    fs::File,
-    os::fd::{AsRawFd, FromRawFd},
-    ops::{Deref, DerefMut}
+    ffi::CString, fs::File, ops::{Deref, DerefMut}, os::fd::FromRawFd
 };
 
 use crate::{
     Result, error::fallback_error
 };
 
-pub struct SharedBuffer {
-    pub shm_file: File,
-    pub data: MmapMut,
-}
+pub struct SharedBuffer (pub MmapMut);
 
 impl SharedBuffer {
-    pub fn as_file_descriptor(&self) -> i32 {
-        self.shm_file.as_raw_fd()
-    }
 
-    pub fn alloc(size: usize) -> Result<Self> {
-        let filename = b"my-own-custom-file\0".as_ptr() as *const libc::c_char;
+    pub fn alloc(size: usize) -> Result<(Self, File)> {
+        let filename = CString::new("my-own-custom-file")?;
         let fd = unsafe {
             libc::shm_open(
-                filename,
+                filename.as_ptr(),
                 libc::O_CREAT | libc::O_EXCL | libc::O_RDWR,
                 0o666,
             )
@@ -36,7 +28,7 @@ impl SharedBuffer {
             ));
         }
 
-        let res = unsafe { libc::shm_unlink(filename) };
+        let res = unsafe { libc::shm_unlink(filename.as_ptr()) };
         if res < 0 {
             return Err(fallback_error!("Error unlinking '{}'", errno::errno()));
         }
@@ -47,23 +39,21 @@ impl SharedBuffer {
 
         let data = unsafe { MmapOptions::new().map_mut(&shm_file)? };
 
-        Ok(Self { shm_file, data })
+        Ok((Self(data), shm_file))
     }
+
 }
 
 
 impl Deref for  SharedBuffer {
     type Target = MmapMut;
-
     fn deref(&self) -> &Self::Target {
-        &self.data
+        &self.0
     }
-
 }
 
 impl DerefMut for SharedBuffer {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        &mut self.0
     }
-
 }

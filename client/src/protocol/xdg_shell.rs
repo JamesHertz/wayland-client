@@ -33,7 +33,7 @@ declare_interfaces! {
         }
 
         @events {
-            configure(height : i32, width: i32, states : Array);
+            configure(width: i32, height : i32, states : Array);
             close();
             configure_bounds(width: i32, height: i32);
             wm_capabilities(capabilities: Array);

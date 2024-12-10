@@ -107,6 +107,7 @@ macro_rules! declare_interfaces {
     (@decl $name : ident, $event_type : ident, $($type_def: tt)+) => {
         declare_interfaces!(@events $event_type , $($type_def)+);
 
+        #[derive(Clone)]
         pub struct $name(WlObjectMetaData); 
         impl WlInterface for $name {
 
@@ -188,6 +189,7 @@ macro_rules! declare_interfaces {
 
     (@decl $name : ident ) => {
         // TODO: remove duplication
+        #[derive(Clone)]
         pub struct $name(WlObjectMetaData); 
         impl WlInterface for $name {
 

@@ -1,9 +1,58 @@
 #![feature(unix_socket_ancillary_data)]
 
-use std::{env, process};
-use client::{client::WaylandClient, error::Result, protocol::{base::*, xdg_shell::*}};
+use std::{cell::RefCell, env, process, rc::Rc};
+use client::{client::{memory::SharedBuffer, WaylandClient}, error::Result, protocol::{base::*, xdg_shell::*}};
 
 use log::info;
+
+struct State {
+    surface   : WlSurface,
+    pixels    : SharedBuffer,
+    buffer    : WlBuffer,
+    turn      : u32,
+    last_time : u32,
+    released  : bool,
+    window_size : i32
+}
+
+fn update(state : Rc<RefCell<State>>, client : &mut WaylandClient<'_>, current_time : u32) {
+    let copy = state;
+    let mut state = copy.borrow_mut();
+
+    if current_time - state.last_time >= 500 && state.released {
+        let window_size = state.window_size;
+        let turn = state.turn;
+        let data = state.pixels.as_mut();
+
+        for i in (0..window_size as usize).step_by(4) {
+            data[i + 0] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
+
+            data[i + turn as usize] = 255;
+        }
+
+        let surface = &state.surface;
+        let buffer  = &state.buffer;
+
+        surface.damage_buffer(0, 0, i32::MAX, i32::MAX).unwrap();
+        surface.attach(buffer, 0, 0).unwrap();
+        surface.commit().unwrap();
+
+        state.last_time = current_time;
+        state.turn      = (turn + 1) % 3;
+        state.released  = false;
+    }
+
+    let cb : WlCallBack  = client.new_object();
+    state.surface.frame(&cb).unwrap(); 
+    drop(state);
+
+    client.add_event_handler(&cb, move |client, msg| {
+        let WlCallBackEvent::Done { data } = msg.event;
+        update(Rc::clone(&copy), client, data);
+    }).unwrap();
+}
 
 fn main() -> Result<()> {
     init_log();
@@ -15,16 +64,10 @@ fn main() -> Result<()> {
     let height = 1080;
     let stride = 4 * width; // size of a line
     let window_size = width * height * 4;
-    let (pool, mut pixel_buffer) = client.create_pool(window_size * 2)?;
+    let (pool, mut pixels) = client.create_pool(window_size)?;
     info!("BufferPool created!");
 
-    {
-        // set buffer content to be dark
-        let data = pixel_buffer.as_mut();
-        for i in (1..window_size as usize).step_by(4) {
-            data[i] = 255;
-        }
-    }
+    pixels.as_mut().fill(0);
 
     let buffer: WlBuffer = client.new_object();
     pool.create_buffer(
@@ -53,24 +96,80 @@ fn main() -> Result<()> {
     xdg_top_level.set_app_id("example-app")?;
     xdg_top_level.set_title("Black Space")?;
 
-    client.add_event_handler(&xdg_top_level, |_, msg| {
-        if let XdgTopLevelEvent::Close = msg.event {
-            info!("Closing window");
-            process::exit(0);
-        }
-    })?;
     surface.commit()?;
 
     surface.attach(&buffer, 0, 0)?;
     surface.commit()?;
 
+
+    let state = Rc::new(RefCell::new(State{
+        surface, buffer, pixels, window_size, turn : 0, last_time: 0, released: false
+    }));
+
+    {
+        let copy  = Rc::clone(&state);
+        let state = state.borrow();
+        // only has one event that is release
+        client.add_event_handler(&state.buffer, move |_, _| {
+            copy.borrow_mut().released = true;
+        })?;
+    }
+
+
+    {
+        let state = Rc::clone(&state);
+        client.add_event_handler(&xdg_top_level, move |client, msg| {
+            match msg.event {
+                XdgTopLevelEvent::Close => {
+                    info!("Closing window");
+                    process::exit(0);
+                }
+
+                XdgTopLevelEvent::Configure { width, height, .. } => {
+                    let mut curr_state = state.borrow_mut();
+                    let new_window_size = 4 * height * width;
+
+                    if new_window_size != curr_state.window_size {
+                        curr_state.window_size = new_window_size;
+
+                        let buffer : WlBuffer = client.new_object();
+                        pool.create_buffer(
+                            &buffer,
+                            0,
+                            width,
+                            height,
+                            4 * width,
+                            WlShmFormat::Xrgb8888,
+                        ).unwrap();
+
+                        let copy = Rc::clone(&state);
+                        client.add_event_handler(&buffer, move |_, _| {
+                            copy.borrow_mut().released = true;
+                        }).unwrap();
+
+                        curr_state.buffer.destroy().unwrap();
+                        curr_state.buffer   = buffer;
+                        curr_state.released = true;
+                    }
+                }
+                _ => ()
+            }
+        })?;
+
+        client.add_event_handler(&xdg_surface, |client, msg| {
+            let XdgSurfaceEvent::Configure { serial_nr } = msg.event;
+            let xdg_surface : XdgSurface = client.get_reference(msg.object_id).unwrap();
+            xdg_surface.ack_configure(serial_nr).unwrap();
+        })?;
+    }
+
+    update(state, &mut client, 0);
     client.event_loop();
     Ok(())
+
     // TODO:
-    //  - get a window on the screen
-    //  - do some clean up
-    //  - think about a way to have event handlers
     //  - keep reading the WaylandBook c:
+    //  - Switch between red and green
 }
 
 pub fn wayland_sockpath() -> String {

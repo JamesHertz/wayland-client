@@ -2,7 +2,7 @@
 pub mod memory;
 
 use std::{
-    any::Any, cell::RefCell, collections::HashMap, io::Read, os::unix::net::UnixStream, rc::Rc
+    any::Any, cell::RefCell, collections::HashMap, io::Read, os::{fd::AsRawFd, unix::net::UnixStream}, rc::Rc
 };
 
 use crate::{
@@ -23,6 +23,7 @@ pub struct WaylandClient<'a> {
 }
 
 impl<'a> WaylandClient<'a> {
+
     pub fn connect(socket_path: &str) -> Result<Self, Error> {
         let socket = error_context!(
             UnixStream::connect(dbg!(socket_path)),
@@ -37,6 +38,7 @@ impl<'a> WaylandClient<'a> {
                 socket.try_clone().expect("Unable to clone UnixStream"),
             )),
             socket,
+            //state: None
         };
 
         client.init_globals()?;
@@ -103,9 +105,9 @@ impl<'a> WaylandClient<'a> {
         // TODO: remove object if error occurrs
         let shm: WlShm = self.get_global().expect("Failed to get global WlShm");
         let pool: WlShmPool = self.new_global();
-        let buffer = SharedBuffer::alloc(size as usize)?;
+        let (buffer, file) = SharedBuffer::alloc(size as usize)?;
 
-        shm.create_pool(&pool, buffer.as_file_descriptor(), size)?;
+        shm.create_pool(&pool, file.as_raw_fd(), size)?;
 
         // TODO: find another way to save the buffer
         Ok((pool, buffer))

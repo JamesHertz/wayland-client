@@ -43,6 +43,9 @@ declare_interfaces !{
             set_opaque_region(region: &WlRegion) => [ Uint32(region.get_object_id()) ];
             set_input_region(region: &WlRegion)  => [ Uint32(region.get_object_id()) ];
             commit();
+            set_buffer_transform(transformation : i32) => [ Int32(transformation) ]; // TODO: add enum for transformation
+            set_buffer_scale(scale : i32) => [ Int32(scale) ];
+            damage_buffer(x: i32, y: i32, width: i32, height: i32) => [ Int32(x), Int32(y), Int32(width), Int32(height) ];
         }
 
         @events {
@@ -74,7 +77,10 @@ declare_interfaces !{
         }
     },
 
-    @interface(WlBuffer) { @events { release(); } },
+    @interface(WlBuffer) { 
+        @requests { destroy(); } 
+        @events   { release(); } 
+    },
 }
 
 
