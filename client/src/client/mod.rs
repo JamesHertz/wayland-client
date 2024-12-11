@@ -14,15 +14,18 @@ use crate::{
 use memory::SharedBuffer;
 use log::{info, trace, warn, error};
 
-pub struct WaylandClient<'a> {
+pub struct WaylandClient<'a, S = ()> {
     globals: HashMap<WlInterfaceId, WaylandId>,
-    objects: WlObjectManager<'a>,
+    objects: WlObjectManager<'a, S>,
     stream: Rc<ClientStream>,
     socket: UnixStream,
     buffer: ByteBuffer,
+    state : Option<S>,
 }
 
-impl<'a> WaylandClient<'a> {
+// TODO: think about if you really want to keep the lifetime
+// TODO: rethink about interface to interact with the state
+impl<'a, S> WaylandClient<'a, S> {
 
     pub fn connect(socket_path: &str) -> Result<Self, Error> {
         let socket = error_context!(
@@ -38,11 +41,19 @@ impl<'a> WaylandClient<'a> {
                 socket.try_clone().expect("Unable to clone UnixStream"),
             )),
             socket,
-            //state: None
+            state: None
         };
 
         client.init_globals()?;
         Ok(client)
+    }
+
+    pub fn get_custom_state(&mut self) -> Option<&mut S> {
+        self.state.as_mut()
+    }
+
+    pub fn set_custom_state(&mut self, state : S) {
+        self.state = Some(state)
     }
 
     pub fn get_global<E, T: WlInterface<Event = E>>(&self) -> Option<T> {
@@ -65,7 +76,7 @@ impl<'a> WaylandClient<'a> {
     ) -> Result<(), WlHandlerRegistryError>
     where
         T: WlInterface<Event = E>,
-        F: FnMut(&mut WaylandClient, WlEventMsg<E>) + 'a,
+        F: FnMut(&mut WaylandClient<S>, WlEventMsg<E>) + 'a,
         E: 'static,
     {
         let object_id = object.get_object_id();
@@ -269,23 +280,23 @@ impl std::fmt::Display for WlHandlerRegistryError {
     }
 }
 
-type MockingHandler<'a> = Box<dyn FnMut(&mut WaylandClient, Box<dyn Any>) + 'a>;
+type MockingHandler<'a, S> = Box<dyn FnMut(&mut WaylandClient<S>, Box<dyn Any>) + 'a>;
 type WlParserWrapper = dyn Fn(RawMessage) -> Result<Box<dyn Any>, WlEventParseError>;
 
-struct WlObjectEntry<'a> {
+struct WlObjectEntry<'a, S> {
     interface : WlObjectInterfaceInfo,
     event_parser: Box<WlParserWrapper>,
-    handler: Option<MockingHandler<'a>>,
+    handler: Option<MockingHandler<'a, S>>,
 }
 
-struct WlObjectManager<'a> {
-    objects: HashMap<WaylandId, WlObjectEntry<'a>>,
+struct WlObjectManager<'a, S> {
+    objects: HashMap<WaylandId, WlObjectEntry<'a, S>>,
     objects_id_count: u32,
 }
 
-struct WlObjectEntryCopy<'a, 'b> {
+struct WlObjectEntryCopy<'a, 'b, S> {
     interface : WlObjectInterfaceInfo,
-    handler: Option<MockingHandler<'a>>,
+    handler: Option<MockingHandler<'a, S>>,
     parser: &'b WlParserWrapper,
 }
 
@@ -295,7 +306,7 @@ struct WlObjectInterfaceInfo {
     display_name : &'static str
 }
 
-impl<'a> WlObjectManager<'a> {
+impl<'a, S> WlObjectManager<'a, S> {
     fn new() -> Self {
         Self {
             objects: HashMap::new(),
@@ -328,7 +339,7 @@ impl<'a> WlObjectManager<'a> {
         &mut self,
         object_id: WaylandId,
         interface_id: WlInterfaceId,
-        handler: MockingHandler<'a>,
+        handler: MockingHandler<'a, S>,
     ) -> Result<(), WlHandlerRegistryError> {
         let entry = self
             .objects
@@ -352,7 +363,7 @@ impl<'a> WlObjectManager<'a> {
     fn get_object_entry_copy<'b>(
         &'b mut self,
         object_id: WaylandId,
-    ) -> Option<WlObjectEntryCopy<'a, 'b>> {
+    ) -> Option<WlObjectEntryCopy<'a, 'b, S>> {
         let entry = self.objects.get_mut(&object_id)?;
 
         Some(WlObjectEntryCopy {

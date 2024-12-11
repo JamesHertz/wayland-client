@@ -1,4 +1,3 @@
-use std::fmt;
 /// Syntax in BNF format:
 /// ```
 /// "declare_interfaces!" "{"
@@ -31,7 +30,7 @@ macro_rules! declare_interfaces {
             $(@events {
                 $($et : tt)+
             })?
-       })?),* $(,)? 
+       })?),* $(,)?
     } => {
         use $crate::{
             protocol::*,
@@ -65,6 +64,7 @@ macro_rules! declare_interfaces {
         }
     };
 
+    (@next_request $id : expr,) => { }; 
     (
         @next_request $id : expr, 
         $request : ident ($($args : tt)*) $(=> [$($expr : expr),+ $(,)? ])?; $($t : tt)*
@@ -87,8 +87,7 @@ macro_rules! declare_interfaces {
         declare_interfaces!(@next_request $id + 1, $($t)*);
     };
 
-    (@next_request $id : expr, ) => {}; 
-    (@events $t : tt ) => { }; 
+    (@events $t : tt) => { }; 
     (@events $event_type : ident, 
              $($event_name : ident (
                      $($($arg : ident $t : tt $type : ty),+)?
@@ -104,7 +103,7 @@ macro_rules! declare_interfaces {
         }
     };
 
-    (@decl $name : ident ) => {
+    (@decl $name : ident) => {
         declare_interfaces!(@decl $name, EmptyEvent);
     };
 
@@ -146,6 +145,7 @@ macro_rules! declare_interfaces {
         }
     };
 
+    (@next_event $obj_id : ident, $event_id : ident, $iter : ident, $id : expr,) => { };
     (@next_event $obj_id : ident, $event_id : ident, $iter: ident, $id : expr, 
             $event_name : ident $(
                 ($($arg : ident $t : tt $type : ty),*)
@@ -190,8 +190,6 @@ macro_rules! declare_interfaces {
     (@parse_arg $other : ty, $iter : ident) => {
         compile_error!("Events arguments types should be either 'u32', 'String', 'i32' or 'Array'");
     };
-
-    (@next_event $obj_id : ident, $event_id : ident, $iter : ident, $id : expr, ) => { };
 }
 
 pub(super) use declare_interfaces;
