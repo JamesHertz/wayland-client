@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-wlclient = { path = "../../wlclient", version = "0.1.0" }
+wlclient = { path = "../../wlclient" }
 log = "0.4.22"

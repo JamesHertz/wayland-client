@@ -1,5 +1,2 @@
-client:
-  cargo run -p client
-
-build:
-  cargo build -p client
+rgb:
+  cargo run -p rgb-color-switch

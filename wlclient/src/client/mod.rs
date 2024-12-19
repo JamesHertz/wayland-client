@@ -1,8 +1,13 @@
-//#![allow(unused)]
 pub mod memory;
 
 use std::{
-    any::Any, cell::RefCell, collections::HashMap, io::Read, os::{fd::AsRawFd, unix::net::UnixStream}, rc::Rc, env
+    any::Any,
+    cell::RefCell,
+    collections::HashMap,
+    env,
+    io::Read,
+    os::{fd::AsRawFd, unix::net::UnixStream},
+    rc::Rc,
 };
 
 use crate::{
@@ -11,8 +16,8 @@ use crate::{
     wire_format::{ClientStream, WireMsgHeader},
 };
 
+use log::{error, info, trace, warn};
 use memory::SharedBuffer;
-use log::{info, trace, warn, error};
 
 pub struct WaylandClient<'a, S = ()> {
     globals: HashMap<WlInterfaceId, WaylandId>,
@@ -20,17 +25,17 @@ pub struct WaylandClient<'a, S = ()> {
     stream: Rc<ClientStream>,
     socket: UnixStream,
     buffer: ByteBuffer,
-    state : Option<S>,
+    state: Option<S>,
 }
 
-
-// TODO: think about if you really want to keep the lifetime
-// TODO: rethink about interface to interact with the state
+// TODO:
+// - Think about if you really want to keep the lifetime
+// - Rethink about interface to interact with the state
+// - Should handler function return `Result<(), Error>`??
 impl<'a, S> WaylandClient<'a, S> {
-
     pub fn connect() -> Result<Self, Error> {
         // TODO: should I add: 'Failed to build from default'?
-        Self::connect_to( &get_wayland_socket_path()? )
+        Self::connect_to(&get_wayland_socket_path()?)
     }
 
     pub fn connect_to(socket_path: &str) -> Result<Self, Error> {
@@ -47,7 +52,7 @@ impl<'a, S> WaylandClient<'a, S> {
                 socket.try_clone().expect("Unable to clone UnixStream"),
             )),
             socket,
-            state: None
+            state: None,
         };
 
         client.init_globals()?;
@@ -58,15 +63,15 @@ impl<'a, S> WaylandClient<'a, S> {
         self.state.as_mut()
     }
 
-    pub fn set_custom_state(&mut self, state : S) {
+    pub fn set_custom_state(&mut self, state: S) {
         self.state = Some(state)
     }
 
-    pub fn get_global<E, T: WlInterface<Event = E>>(&self) -> Option<T> {
+    pub fn get_global<T: WlInterface<Event = E>, E>(&self) -> Option<T> {
         self.get_reference(self.globals.get(&T::get_interface_id()).copied()?)
     }
 
-    pub fn get_reference<E, T: WlInterface<Event = E>>(&self, object_id: u32) -> Option<T> {
+    pub fn get_reference<T: WlInterface<Event = E>, E>(&self, object_id: u32) -> Option<T> {
         match self.objects.get_object_interface(object_id) {
             Some(interface_id) if interface_id == T::get_interface_id() => {
                 Some(T::build(object_id, self.stream.clone()))
@@ -100,9 +105,16 @@ impl<'a, S> WaylandClient<'a, S> {
         )
     }
 
-    pub fn event_loop(mut self)  {
-        loop  {
-             match self.next_msg() {
+    pub fn remove_event_handler<T: WlInterface<Event = E>, E>(
+        &mut self,
+        object: &T,
+    ) -> Result<(), WlHandlerRegistryError> {
+        self.objects.remove_handler(object.get_object_id())
+    }
+
+    pub fn event_loop(mut self) {
+        loop {
+            match self.next_msg() {
                 Err(err) => error!("Reading message from the wire: {err:#?}!"),
                 Ok(msg) => {
                     if let Err(err) = self.handle_msg(msg) {
@@ -113,13 +125,11 @@ impl<'a, S> WaylandClient<'a, S> {
         }
     }
 
-    pub fn create_pool(
-        &mut self,
-        size: i32,
-    ) -> Result<(WlShmPool, SharedBuffer), Error> {
+    pub fn create_pool(&mut self, size: i32) -> Result<(WlShmPool, SharedBuffer), Error> {
         assert!(size > 0);
 
         // TODO: remove object if error occurrs
+        // TODO: remove expect and actually return an error
         let shm: WlShm = self.get_global().expect("Failed to get global WlShm");
         let pool: WlShmPool = self.new_global();
         let (buffer, file) = SharedBuffer::alloc(size as usize)?;
@@ -140,18 +150,16 @@ impl<'a, S> WaylandClient<'a, S> {
                 code,
                 message,
             } => error!("Wayland error {code} for object {object_id}: {message:?}"), // TODO: add more context c: (display the object interface)
-            WlDisplayEvent::DeleteId { id} => {
-                match client.objects.get_object_entry_copy(id) {
-                    Some(obj) => {
-                        log::debug!("Delecting object {id} @ {}", obj.interface.display_name);
-                        client.objects.remove_object(id);
-                    }
-                    None => log::error!("Received delete for a non existant object {id}")
+            WlDisplayEvent::DeleteId { id } => match client.objects.get_object_entry_copy(id) {
+                Some(obj) => {
+                    log::debug!("Delecting object {id} @ {}", obj.interface.display_name);
+                    client.objects.remove_object(id);
                 }
-            }
+                None => log::error!("Received delete for a non existant object {id}"),
+            },
         })?;
 
-        let registry : WlRegistry = self.new_global();
+        let registry: WlRegistry = self.new_global();
         display.get_registry(&registry)?;
 
         self.add_event_handler(&registry, |client, msg| {
@@ -164,7 +172,15 @@ impl<'a, S> WaylandClient<'a, S> {
             let object_id = match interface.as_str() {
                 "wl_compositor" => client.new_global_id::<WlCompositor, _>(),
                 "xdg_wm_base" => client.new_global_id::<XdgWmBase, _>(),
-                "wl_shm" => client.new_global_id::<WlShm, _>(),
+                "wl_shm" => {
+                    let shm : WlShm = client.new_global();
+
+                    // Ignore shm messages, I don't really care about those, since Argb and Xrgb
+                    // are mandatory to be implemented by the server, so I am cool c:
+                    // This is to surpress the warning messages: 'No handler for object ...'
+                    client.add_event_handler(&shm, |_, _| {}).unwrap();
+                    shm.get_object_id()
+                }
                 _ => return,
             };
 
@@ -173,7 +189,7 @@ impl<'a, S> WaylandClient<'a, S> {
             registry.bind(name, interface, version, object_id).unwrap(); // TODO: add proper error message
         })?;
 
-        let callback : WlCallBack = self.new_object();
+        let callback: WlCallBack = self.new_object();
         display.sync(&callback)?;
 
         let completed = Rc::new(RefCell::new(false));
@@ -181,7 +197,8 @@ impl<'a, S> WaylandClient<'a, S> {
             let flag = Rc::clone(&completed);
             self.add_event_handler(&callback, move |_, _| {
                 *flag.borrow_mut() = true;
-            }).unwrap();
+            })
+            .unwrap();
         }
 
         while !*completed.borrow() {
@@ -194,10 +211,10 @@ impl<'a, S> WaylandClient<'a, S> {
 
     #[inline(always)]
     fn new_global_id<T: WlInterface<Event = E>, E: Sized + 'static>(&mut self) -> WaylandId {
-        self.new_global::<E, T>().get_object_id()
+        self.new_global::<T, E>().get_object_id()
     }
 
-    fn new_global<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
+    fn new_global<T: WlInterface<Event = E>, E: Sized + 'static>(&mut self) -> T {
         let object: T = self.new_object();
         assert!(
             self.globals
@@ -208,11 +225,11 @@ impl<'a, S> WaylandClient<'a, S> {
         object
     }
 
-    pub fn new_object<E: Sized + 'static, T: WlInterface<Event = E>>(&mut self) -> T {
+    pub fn new_object<T: WlInterface<Event = E>, E: Sized + 'static>(&mut self) -> T {
         let object_id = self.objects.new_object(
             WlObjectInterfaceInfo {
                 id: T::get_interface_id(),
-                display_name: T::get_display_name()
+                display_name: T::get_display_name(),
             },
             Box::new(|raw_msg| T::parse_msg(raw_msg).map(|value| value.to_any())),
         );
@@ -223,20 +240,19 @@ impl<'a, S> WaylandClient<'a, S> {
     fn handle_msg(&mut self, msg: RawMessage) -> Result<(), Error> {
         let object_id = msg.object_id;
         let event_id = msg.event_id;
-        
-        let mut entry = self.objects.get_object_entry_copy(msg.object_id).ok_or_else(|| {
-            fallback_error!("Received message to an non-existant object: {object_id}")
-        })?;
+
+        let mut entry = self
+            .objects
+            .get_object_entry_copy(msg.object_id)
+            .ok_or_else(|| fallback_error!("Received message to an non-existant object: {object_id}"))?;
 
         let interface_id = entry.interface.id;
         let display_name = entry.interface.display_name;
 
         // TODO: add a few methods for the type entry c: (like parse and take c:)
-        let msg = error_context!(
-            (entry.parser)(msg), "Of object {object_id} @ {display_name}"
-        )?;
+        let msg = error_context!((entry.parser)(msg), "Of object {object_id} @ {display_name}")?;
         let mut handler = entry.handler.take().ok_or_else(|| {
-            fallback_error!("No handler for event {event_id} of object {object_id} @ {display_name}")
+            fallback_error!("No handler object {object_id} @ {display_name} (received event {event_id})")
         })?;
 
         handler(self, msg);
@@ -275,19 +291,12 @@ impl<'a, S> WaylandClient<'a, S> {
 
 // TODO: follow the atual protocol
 pub fn get_wayland_socket_path() -> Result<String, Error> {
-    let xdg_dir = error_context!(
-        env::var("XDG_RUNTIME_DIR"),
-        "Failed to get XDG_RUNTIME_DIR var"
-    )?;
+    let xdg_dir = error_context!(env::var("XDG_RUNTIME_DIR"), "Failed to get XDG_RUNTIME_DIR var")?;
 
-    let socket_file = error_context!(
-        env::var("WAYLAND_DISPLAY"),
-        "Failed to get WAYLAND_DISPLAY var"
-    )?;
+    let socket_file = error_context!(env::var("WAYLAND_DISPLAY"), "Failed to get WAYLAND_DISPLAY var")?;
 
     Ok(format!("{xdg_dir}/{socket_file}"))
 }
-
 
 #[derive(Debug)]
 pub enum WlHandlerRegistryError {
@@ -306,7 +315,7 @@ type MockingHandler<'a, S> = Box<dyn FnMut(&mut WaylandClient<S>, Box<dyn Any>) 
 type WlParserWrapper = dyn Fn(RawMessage) -> Result<Box<dyn Any>, WlEventParseError>;
 
 struct WlObjectEntry<'a, S> {
-    interface : WlObjectInterfaceInfo,
+    interface: WlObjectInterfaceInfo,
     event_parser: Box<WlParserWrapper>,
     handler: Option<MockingHandler<'a, S>>,
 }
@@ -317,15 +326,15 @@ struct WlObjectManager<'a, S> {
 }
 
 struct WlObjectEntryCopy<'a, 'b, S> {
-    interface : WlObjectInterfaceInfo,
+    interface: WlObjectInterfaceInfo,
     handler: Option<MockingHandler<'a, S>>,
     parser: &'b WlParserWrapper,
 }
 
 #[derive(Copy, Clone)]
 struct WlObjectInterfaceInfo {
-    id : u32,
-    display_name : &'static str
+    id: u32,
+    display_name: &'static str,
 }
 
 impl<'a, S> WlObjectManager<'a, S> {
@@ -338,7 +347,7 @@ impl<'a, S> WlObjectManager<'a, S> {
 
     fn new_object(
         &mut self,
-        interface : WlObjectInterfaceInfo,
+        interface: WlObjectInterfaceInfo,
         event_parser: Box<WlParserWrapper>,
     ) -> WaylandId {
         self.objects_id_count += 1;
@@ -355,6 +364,16 @@ impl<'a, S> WlObjectManager<'a, S> {
             )
             .is_none());
         self.objects_id_count
+    }
+
+    // If it returns an error, it will be: WlHandlerRegistryError::NoSuchObject
+    fn remove_handler(&mut self, object_id: WaylandId) -> Result<(), WlHandlerRegistryError> {
+        let entry = self
+            .objects
+            .get_mut(&object_id)
+            .ok_or(WlHandlerRegistryError::NoSuchObject)?;
+        entry.handler = None;
+        Ok(())
     }
 
     fn add_handler(
@@ -391,7 +410,7 @@ impl<'a, S> WlObjectManager<'a, S> {
         Some(WlObjectEntryCopy {
             handler: entry.handler.take(),
             parser: entry.event_parser.as_ref(),
-            interface: entry.interface
+            interface: entry.interface,
         })
     }
 
@@ -466,6 +485,4 @@ impl ByteBuffer {
 }
 
 #[cfg(test)]
-mod test {
-
-}
+mod test {}
