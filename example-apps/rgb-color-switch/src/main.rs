@@ -67,6 +67,7 @@ fn main() -> Result<()> {
     let height = 1080;
     let stride = 4 * width; // size of a line
     let window_size = width * height * 4;
+
     let (pool, mut pixels) = client.create_pool(window_size)?;
     info!("BufferPool created!");
 

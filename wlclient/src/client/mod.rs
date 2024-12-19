@@ -71,6 +71,26 @@ impl<'a, S> WaylandClient<'a, S> {
         self.get_reference(self.globals.get(&T::get_interface_id()).copied()?)
     }
 
+    // TODO: use actual enumerate for errors
+    pub fn upgrade_to_global<T: WlInterface<Event = E>, E>(&mut self, object : &T) -> Result<(), Error> {
+        let object_id = object.get_object_id();
+        let Some(interface_id) = self.objects.get_object_interface(object_id) else {
+            return Err(fallback_error!("No such object"));
+        };
+
+        if interface_id != T::get_interface_id() {
+            return Err(fallback_error!("Invalid object interface"));
+        }
+
+        // TODO: think about this c:
+        if let Some(_) = self.globals.get(&interface_id) {
+            return Err(fallback_error!("Global of '{}' already registered", T::get_display_name()));
+        }
+
+        let _ = self.globals.insert(interface_id, object_id);
+        Ok(())
+    }
+
     pub fn get_reference<T: WlInterface<Event = E>, E>(&self, object_id: u32) -> Option<T> {
         match self.objects.get_object_interface(object_id) {
             Some(interface_id) if interface_id == T::get_interface_id() => {
@@ -131,7 +151,7 @@ impl<'a, S> WaylandClient<'a, S> {
         // TODO: remove object if error occurrs
         // TODO: remove expect and actually return an error
         let shm: WlShm = self.get_global().expect("Failed to get global WlShm");
-        let pool: WlShmPool = self.new_global();
+        let pool: WlShmPool = self.new_object();
         let (buffer, file) = SharedBuffer::alloc(size as usize)?;
 
         shm.create_pool(&pool, file.as_raw_fd(), size)?;
