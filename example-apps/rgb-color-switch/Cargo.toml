@@ -1,0 +1,8 @@
+[package]
+name = "rgb-color-switch"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wlclient = { path = "../../wlclient", version = "0.1.0" }
+log = "0.4.22"

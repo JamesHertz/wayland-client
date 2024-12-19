@@ -1,7 +1,5 @@
-#![feature(unix_socket_ancillary_data)]
-
-use std::{env, process};
-use client::{client::{memory::SharedBuffer, WaylandClient}, error::Result, protocol::{base::*, xdg_shell::*}};
+use std::process;
+use wlclient::{client::{memory::SharedBuffer, WaylandClient}, error::Result, protocol::{base::*, xdg_shell::*}};
 
 use log::info;
 
@@ -47,16 +45,18 @@ fn update(client : &mut WaylandClient<'_, State>, current_time : u32) {
     let state = client.get_custom_state().unwrap();
     state.surface.frame(&cb).unwrap();
 
-    client.add_event_handler(&cb, move |client, msg| {
+    client.add_event_handler(&cb, |client, msg| {
         let WlCallBackEvent::Done { data } = msg.event;
         update(client, data);
     }).unwrap();
 }
 
 fn main() -> Result<()> {
-    init_log();
+    wlclient::init_log();
 
-    let mut client = WaylandClient::<'_, State>::connect(&wayland_sockpath())?;
+    //let mut client = WaylandClient::<'_, State>::connect_to(&wayland_sockpath())?;
+    let mut client = wlclient::connect::<State>()?;
+//let mut client = WaylandClient::<State>::connect()?;
     info!("Initialization completed!");
 
     let width = 1920;
@@ -100,7 +100,7 @@ fn main() -> Result<()> {
     surface.attach(&buffer, 0, 0)?;
     surface.commit()?;
 
-    client.add_event_handler(&buffer, move |client, _| {
+    client.add_event_handler(&buffer, |client, _| {
         client.get_custom_state().unwrap().released = true;
     })?;
 
@@ -134,7 +134,7 @@ fn main() -> Result<()> {
                         WlShmFormat::Xrgb8888,
                     ).unwrap();
 
-                    client.add_event_handler(&buffer, move |client, _| {
+                    client.add_event_handler(&buffer, |client, _| {
                         client.get_custom_state().unwrap().released = true;
                     }).unwrap();
 
@@ -160,22 +160,6 @@ fn main() -> Result<()> {
 
     // TODO:
     //  - keep reading the WaylandBook c:
-    //  - Switch between red and green
+    //  - Switch between red and green (when the user clicks somewhere on the screen)
 }
 
-pub fn wayland_sockpath() -> String {
-    format!(
-        "{}/{}",
-        env::var("XDG_RUNTIME_DIR").expect("Failed to get XDG_RUNTIME_DIR var"),
-        env::var("WAYLAND_DISPLAY").expect("Failed to get WAYLAND_DISPLAY var"),
-    )
-}
-
-pub fn init_log() {
-    if env::var_os("RUST_LOG").is_none() {
-        unsafe {
-            env::set_var("RUST_LOG", "info");
-        }
-    }
-    pretty_env_logger::init();
-}

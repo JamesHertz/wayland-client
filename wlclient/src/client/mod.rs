@@ -2,7 +2,7 @@
 pub mod memory;
 
 use std::{
-    any::Any, cell::RefCell, collections::HashMap, io::Read, os::{fd::AsRawFd, unix::net::UnixStream}, rc::Rc
+    any::Any, cell::RefCell, collections::HashMap, io::Read, os::{fd::AsRawFd, unix::net::UnixStream}, rc::Rc, env
 };
 
 use crate::{
@@ -23,11 +23,17 @@ pub struct WaylandClient<'a, S = ()> {
     state : Option<S>,
 }
 
+
 // TODO: think about if you really want to keep the lifetime
 // TODO: rethink about interface to interact with the state
 impl<'a, S> WaylandClient<'a, S> {
 
-    pub fn connect(socket_path: &str) -> Result<Self, Error> {
+    pub fn connect() -> Result<Self, Error> {
+        // TODO: should I add: 'Failed to build from default'?
+        Self::connect_to( &get_wayland_socket_path()? )
+    }
+
+    pub fn connect_to(socket_path: &str) -> Result<Self, Error> {
         let socket = error_context!(
             UnixStream::connect(dbg!(socket_path)),
             "Failed to establish connection."
@@ -267,6 +273,22 @@ impl<'a, S> WaylandClient<'a, S> {
     }
 }
 
+// TODO: follow the atual protocol
+pub fn get_wayland_socket_path() -> Result<String, Error> {
+    let xdg_dir = error_context!(
+        env::var("XDG_RUNTIME_DIR"),
+        "Failed to get XDG_RUNTIME_DIR var"
+    )?;
+
+    let socket_file = error_context!(
+        env::var("WAYLAND_DISPLAY"),
+        "Failed to get WAYLAND_DISPLAY var"
+    )?;
+
+    Ok(format!("{xdg_dir}/{socket_file}"))
+}
+
+
 #[derive(Debug)]
 pub enum WlHandlerRegistryError {
     NoSuchObject,
@@ -441,4 +463,9 @@ impl ByteBuffer {
             Ok(res)
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+
 }

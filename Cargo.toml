@@ -3,5 +3,6 @@
 # TODO: remove this later
 resolver = "1"
 members  = [
-  "client"
+  "wlclient",
+  "example-apps/rgb-color-switch"
 ]
