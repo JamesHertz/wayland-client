@@ -291,7 +291,11 @@ fn update(client: &mut WaylandClient<'_, Window>, new_width: i32, new_height: i3
         let square_width = (2 * square_height) / 3;
 
         let letter_gap = square_width / 8;
-        let start_y = pixels.get_height() / 2 - square_height / 2;
+        let start_y = if pixels.get_height() > square_height {
+            pixels.get_height() / 2 - square_height / 2
+        } else {
+            0
+        };
 
         let line_width = 2 * letter_gap;
 
