@@ -13,9 +13,9 @@ struct Window {
     surface: WlSurface,
     wm_surface: XdgSurface,
     top_level: XdgTopLevel,
-    buffer: Option<WlBuffer>,
+    //buffer: Option<WlBuffer>,
 
-    pixels: WindowBuffer,
+    canvas: WindowBuffer,
 }
 
 const MAX_WIDTH: i32 = 1920;
@@ -73,7 +73,7 @@ impl WindowBuffer {
     }
 
     fn resize(&mut self, width: i32, height: i32) {
-        assert!(width > 0 && height > 0);
+        assert!(width >= 0 && height >= 0);
         assert!(
             self.buffer.len() >= width as usize * height as usize * mem::size_of::<u32>(),
             "Underline buffer overflow ( allocated-size: {}, new-size: {width} x {height} )",
@@ -167,17 +167,14 @@ fn create_window<T>(client: &mut WaylandClient<'_, T>, app_id: &str, title: &str
     let (pool, shared_buffer) = client.create_pool(MAX_WINDOW_SIZE)?;
     client.upgrade_to_global(&pool)?;
 
-    let mut pixels = WindowBuffer::new(MAX_WIDTH, MAX_HEIGHT, shared_buffer);
-
-    pixels.fill(Color::White);
+    let mut canvas = WindowBuffer::new(0, 0, shared_buffer);
+    canvas.fill(Color::White);
 
     Ok(Window {
         surface,
         top_level,
-        buffer: None,
         wm_surface: xdg_surface,
-
-        pixels,
+        canvas,
     })
 }
 
@@ -209,8 +206,8 @@ fn render_char(
         }
 
         'l' => {
-            canvas.fill_rect(start_x + line_width, start_y, line_width, square_height, color);
-            canvas.fill_rect(start_x + line_width, start_y + square_height - line_width, square_width - line_width, line_width, color);
+            canvas.fill_rect(start_x + line_width / 2, start_y, line_width, square_height, color);
+            canvas.fill_rect(start_x + line_width / 2, start_y + square_height - line_width, square_width - line_width / 2, line_width, color);
         }
 
         'o' => {
@@ -275,24 +272,20 @@ fn update(client: &mut WaylandClient<'_, Window>, new_width: i32, new_height: i3
     client.add_event_handler(&buffer, |client, WlEventMsg { object_id, .. }| {
         let buffer: WlBuffer = client.get_reference(object_id).unwrap();
         buffer.destroy();
-        if let Some(window) = client.get_custom_state() {
-            window.buffer = None;
-        }
-        assert!(client.get_custom_state().unwrap().buffer.is_none());
     });
 
     let window = client.get_custom_state().unwrap();
     {
-        let pixels = &mut window.pixels;
-        pixels.resize(new_width, new_height);
-        pixels.fill(Color::White);
+        let canvas = &mut window.canvas;
+        canvas.resize(new_width, new_height);
+        canvas.fill(Color::White);
 
         let square_height = 90;
-        let square_width = (2 * square_height) / 3;
+        let square_width  = (2 * square_height) / 3;
 
         let letter_gap = square_width / 8;
-        let start_y = if pixels.get_height() > square_height {
-            pixels.get_height() / 2 - square_height / 2
+        let start_y = if canvas.get_height() > square_height {
+            canvas.get_height() / 2 - square_height / 2
         } else {
             0
         };
@@ -308,14 +301,14 @@ fn update(client: &mut WaylandClient<'_, Window>, new_width: i32, new_height: i3
             }
         });
 
-        let mut start_x = if estimated_width < pixels.get_width() {
-            pixels.get_width() / 2 - estimated_width / 2
+        let mut start_x = if estimated_width < canvas.get_width() {
+            canvas.get_width() / 2 - estimated_width / 2
         } else {
             letter_gap
         };
 
         for (i, letter) in text.chars().enumerate() {
-            render_char(pixels, letter, line_width, start_x, start_y, square_width, square_height, Color::Black);
+            render_char(canvas, letter, line_width, start_x, start_y, square_width, square_height, Color::Black);
 
             if !letter.is_whitespace() {
                 start_x += letter_gap + square_width;
@@ -328,8 +321,7 @@ fn update(client: &mut WaylandClient<'_, Window>, new_width: i32, new_height: i3
     surface.attach(&buffer, 0, 0)?;
     surface.commit()?;
 
-    window.buffer = Some(buffer);
-    window.pixels.resize(new_width, new_height);
+    window.canvas.resize(new_width, new_height);
     Ok(())
 }
 
@@ -348,7 +340,7 @@ fn main() -> Result<()> {
 
         XdgTopLevelEvent::Configure { width, height, .. } => {
             let window = client.get_custom_state().unwrap();
-            let buffer = &window.pixels;
+            let buffer = &window.canvas;
 
             if buffer.get_width() != width as u32 || buffer.get_height() != height as u32 {
                 let Err(error) = update(client, width, height) else {
@@ -364,6 +356,12 @@ fn main() -> Result<()> {
         let XdgSurfaceEvent::Configure { serial_nr } = msg.event;
         let xdg_surface: XdgSurface = client.get_reference(msg.object_id).unwrap();
         xdg_surface.ack_configure(serial_nr).unwrap();
+
+        let window = client.get_custom_state().unwrap();
+        let buffer = &window.canvas;
+        if buffer.get_width() == 0 && buffer.get_height() == 0 {
+            update(client, MAX_WIDTH, MAX_HEIGHT).unwrap();
+        }
     });
 
     client.set_custom_state(window);

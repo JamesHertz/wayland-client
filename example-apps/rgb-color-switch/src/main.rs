@@ -20,7 +20,7 @@ struct State {
 fn update(client: &mut WaylandClient<'_, State>, current_time: u32) {
     let state = client.get_custom_state().unwrap();
 
-    if current_time - state.last_time >= 500 && state.released {
+    if current_time == 0 || current_time - state.last_time >= 500 && state.released {
         let window_size = state.window_size;
         let turn = state.turn;
         let data = state.pixels.as_mut();
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     let (pool, mut pixels) = client.create_pool(window_size)?;
     info!("BufferPool created!");
 
-    pixels.as_mut().fill(0);
+    pixels.as_mut().fill(255);
 
     let buffer: WlBuffer = client.new_object();
     pool.create_buffer(&buffer, 0, width, height, stride, WlShmFormat::Xrgb8888)?;
@@ -88,12 +88,9 @@ fn main() -> Result<()> {
 
     let xdg_top_level: XdgTopLevel = client.new_object();
     xdg_surface.get_toplevel(&xdg_top_level)?;
-    xdg_top_level.set_app_id("example-app")?;
-    xdg_top_level.set_title("Black Space")?;
+    xdg_top_level.set_app_id("rbg-switch-app")?;
+    xdg_top_level.set_title("Rbg Switch")?;
 
-    surface.commit()?;
-
-    surface.attach(&buffer, 0, 0)?;
     surface.commit()?;
 
     client.add_event_handler(&buffer, |client, _| {
@@ -104,7 +101,7 @@ fn main() -> Result<()> {
         surface,
         buffer,
         pixels,
-        window_size,
+        window_size: 0,
         turn: 0,
         last_time: 0,
         released: false,
@@ -121,6 +118,7 @@ fn main() -> Result<()> {
             let new_window_size = 4 * height * width;
 
             if new_window_size != state.window_size {
+                let old_window_size = state.window_size;
                 state.window_size = new_window_size;
 
                 let buffer: WlBuffer = client.new_object();
@@ -137,6 +135,9 @@ fn main() -> Result<()> {
                 state.buffer.destroy().unwrap();
                 state.buffer = buffer;
                 state.released = true;
+                if old_window_size == 0 {
+                    update(client, 0);
+                }
             }
         }
         _ => (),
@@ -146,9 +147,18 @@ fn main() -> Result<()> {
         let XdgSurfaceEvent::Configure { serial_nr } = msg.event;
         let xdg_surface: XdgSurface = client.get_reference(msg.object_id).unwrap();
         xdg_surface.ack_configure(serial_nr).unwrap();
+
+        let state = client.get_custom_state().unwrap();
+        if state.window_size == 0 {
+            let surface = &state.surface;
+            let buffer  = &state.buffer;
+            surface.damage_buffer(0, 0, i32::MAX, i32::MAX).unwrap();
+            surface.attach(buffer, 0, 0).unwrap();
+            surface.commit().unwrap();
+        }
+
     })?;
 
-    update(&mut client, 0);
     client.event_loop();
     Ok(())
 }

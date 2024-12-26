@@ -39,8 +39,9 @@ impl<'a, S> WaylandClient<'a, S> {
     }
 
     pub fn connect_to(socket_path: &str) -> Result<Self, Error> {
+        log::debug!("Connecting to socket_path = {socket_path}");
         let socket = error_context!(
-            UnixStream::connect(dbg!(socket_path)),
+            UnixStream::connect(socket_path),
             "Failed to establish connection."
         )?;
 
@@ -191,7 +192,16 @@ impl<'a, S> WaylandClient<'a, S> {
 
             let object_id = match interface.as_str() {
                 "wl_compositor" => client.new_global_id::<WlCompositor, _>(),
-                "xdg_wm_base" => client.new_global_id::<XdgWmBase, _>(),
+                "xdg_wm_base" => {
+                    let wm : XdgWmBase  = client.new_global();
+                    client.add_event_handler(&wm, |client, msg| {
+                        let wm : XdgWmBase = client.get_reference(msg.object_id).unwrap();
+                        let XdgWmBaseEvent::Ping { serial } = msg.event;
+                        wm.pong(serial).unwrap();
+                    }).unwrap();
+
+                    wm.get_object_id()
+                }
                 "wl_shm" => {
                     let shm : WlShm = client.new_global();
 
