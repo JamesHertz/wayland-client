@@ -1,22 +1,26 @@
 #![allow(unused)]
-use crate::error;
-use std::{any::Any, fmt::{self, format, Display}, rc::Rc};
-
-pub mod base;
-mod macros;
-pub mod xdg_shell;
+use std::{any::Any, fmt, rc::Rc};
+use std::io::Error as IoError;
+use wire_format::parsing;
 
 #[allow(unused_imports)]
 pub use self::WireValue::*;
-
 #[allow(unused_imports)]
 use macros::declare_interfaces;
+
+pub use wire_format::{WireMsgHeader, ClientStream};
+
+pub mod base;
+pub mod wire_format;
+pub mod xdg_shell;
+mod macros;
 
 pub type WlInterfaceId = u32;
 pub type WaylandId = u32;
 pub type WlEventId = u16;
 pub type Array = Vec<u32>;
 pub type EmptyEvent = ();
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub enum WireValue {
@@ -49,7 +53,7 @@ pub struct WireMessage<'a> {
 // Implementation of this trait are recommended to use interior mutability
 // (https://doc.rust-lang.org/reference/interior-mutability.html)
 pub trait WaylandStream {
-    fn send(&self, msg: WireMessage) -> Result<usize, error::Error>;
+    fn send(&self, msg: WireMessage) -> Result<usize>;
 }
 
 // TODO: fix this later
@@ -89,9 +93,9 @@ pub trait WlInterface {
         object_id: WaylandId,
         event_id: WlEventId,
         iter: &mut impl Iterator<Item = u8>,
-    ) -> Result<Self::Event, WlEventParseError>;
+    ) -> Result<Self::Event>;
 
-    fn parse_msg(msg: RawMessage) -> Result<WlEventMsg<Self::Event>, WlEventParseError> {
+    fn parse_msg(msg: RawMessage) -> Result<WlEventMsg<Self::Event>> {
         let object_id = msg.object_id;
         let event_id = msg.event_id;
         let mut iter = msg.payload.iter().copied();
@@ -99,9 +103,9 @@ pub trait WlInterface {
 
         let remaining = iter.count();
         if remaining != 0 {
-            return Err(WlEventParseError::ParsingError(error::fallback_error!(
-                "Found {remaining} extra bytes while parsing {event:?}."
-            )));
+            return Err(Error::UnexpectedExtraBytes { 
+                object_id, event_id, extra_bytes: remaining 
+            });
         }
 
         Ok(WlEventMsg { object_id, event })
@@ -123,19 +127,27 @@ impl fmt::Debug for WlObjectMetaData {
 }
 
 #[derive(Debug)]
-pub enum WlEventParseError {
+pub enum Error {
     NoEvent(WlEventId),
-    ParsingError(error::Error),
+    UnexpectedExtraBytes { object_id : u32, event_id : u16, extra_bytes : usize },
+    ParsingError(parsing::Error),
+    IoError(IoError),
 }
 
-impl From<error::Error> for WlEventParseError {
-    fn from(value: error::Error) -> Self {
+impl From<IoError> for Error {
+    fn from(value: IoError) -> Self {
+        Error::IoError(value)
+    }
+}
+
+impl From<parsing::Error> for Error {
+    fn from(value: parsing::Error) -> Self {
         Self::ParsingError(value)
     }
 }
 
-impl fmt::Display for WlEventParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::result::Result<(), fmt::Error> {
         // TODO: implement Display for error::Error so that this can be more beautiful
         // TODO: implment display for this
         write!(f, "{self:?}")

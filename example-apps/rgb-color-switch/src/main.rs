@@ -17,7 +17,7 @@ struct State {
     window_size: i32,
 }
 
-fn update(client: &mut WaylandClient<'_, State>, current_time: u32) {
+fn update(client: &mut WaylandClient<State>, current_time: u32) {
     let state = client.get_custom_state().unwrap();
 
     if current_time == 0 || current_time - state.last_time >= 500 && state.released {
@@ -26,7 +26,7 @@ fn update(client: &mut WaylandClient<'_, State>, current_time: u32) {
         let data = state.pixels.as_mut();
 
         for i in (0..window_size as usize).step_by(4) {
-            data[i + 0] = 0;
+            data[i] = 0;
             data[i + 1] = 0;
             data[i + 2] = 0;
 

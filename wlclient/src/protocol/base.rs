@@ -1,5 +1,6 @@
 use super::declare_interfaces;
 
+
 declare_interfaces !{
     @FirstId = 0,
     WlRegion,

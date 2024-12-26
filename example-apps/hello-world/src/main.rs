@@ -141,7 +141,7 @@ impl WindowBuffer {
     }
 }
 
-fn create_window<T>(client: &mut WaylandClient<'_, T>, app_id: &str, title: &str) -> Result<Window> {
+fn create_window<T>(client: &mut WaylandClient<T>, app_id: &str, title: &str) -> Result<Window> {
     // create surfaces
     let (surface, xdg_surface, top_level) = {
         let compositor: WlCompositor = client.get_global().expect("Failed to get WlCompositor");
@@ -255,7 +255,7 @@ fn render_char(
     }
 }
 
-fn update(client: &mut WaylandClient<'_, Window>, new_width: i32, new_height: i32) -> Result<()> {
+fn update(client: &mut WaylandClient<Window>, new_width: i32, new_height: i32) -> Result<()> {
     //let window = client.get_custom_state().unwrap();
 
     let pool: WlShmPool = client.get_global().expect("Failed to get pool");

@@ -11,7 +11,6 @@ use std::env;
 pub mod client;
 pub mod error;
 pub mod protocol;
-mod wire_format;
 
 pub use error::{Error, Result};
 pub use protocol::WaylandId;
@@ -25,10 +24,10 @@ pub fn init_log() {
     pretty_env_logger::init();
 }
 
-pub fn connect<'a, S>() -> Result<WaylandClient<'a, S>> {
+pub fn connect<S>() -> Result<WaylandClient<S>> {
     WaylandClient::connect()
 }
 
-pub fn connect_to<'a, S>(path : &str) -> Result<WaylandClient<'a, S>> {
+pub fn connect_to<S>(path : &str) -> Result<WaylandClient<S>> {
     WaylandClient::connect_to(path)
 }

@@ -1,14 +1,8 @@
-use crate::{
-    error::{error_context, fallback_error},
-    protocol::*,
-    Error, Result,
-};
+use super::*;
 use std::{
     cell::RefCell,
     io::{IoSlice, Write},
-    iter::Iterator,
     os::unix::net::{SocketAncillary, UnixStream},
-    str,
 };
 
 #[derive(Debug)]
@@ -34,6 +28,7 @@ impl WireMsgHeader {
         }
     }
 }
+
 
 pub struct ClientStream(RefCell<UnixStream>);
 impl ClientStream {
@@ -93,21 +88,22 @@ impl WaylandStream for ClientStream {
         let bytes = size_and_event_id.to_ne_bytes();
         buffer[4..8].copy_from_slice(&bytes);
 
-        let result = if let Some(fd) = file_desc {
-            // 32 is s total random number, I think I only need 4 but I am not sure
-            // TODO: do research on this ...
-            let mut ancillary_buffer = [0; 32];
-            let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
-            ancillary.add_fds(&[fd][..]);
+        let size = match file_desc {
+            Some(fd) => {
+                // 32 is s total random number, I think I only need 4 but I am not sure
+                // TODO: do research on this ...
+                let mut ancillary_buffer = [0; 32];
+                let mut ancillary = SocketAncillary::new(&mut ancillary_buffer[..]);
+                ancillary.add_fds(&[fd][..]);
 
-            self.0
-                .borrow_mut()
-                .send_vectored_with_ancillary(&[IoSlice::new(&buffer)][..], &mut ancillary)
-        } else {
-            self.0.borrow_mut().write(&buffer)
+                self.0
+                    .borrow_mut()
+                    .send_vectored_with_ancillary(&[IoSlice::new(&buffer)][..], &mut ancillary)?
+            }
+            None => self.0.borrow_mut().write(&buffer)?,
         };
 
-        result.map_err(Error::IoError)
+        Ok(size)
     }
 }
 
@@ -134,13 +130,44 @@ fn str_aligned_size(base_size: usize) -> usize {
 
 // parsing helper functions
 pub mod parsing {
-    use super::*;
+    use super::{str_aligned_size, u32_from_bytes};
+    use std::str;
+
+
+    //use super::*;
+    pub type Result<T> = std::result::Result<T, Error>;
+
+    #[derive(Debug)]
+    pub enum Error {
+        MissingField(&'static str),
+        InvalidUtfString(str::Utf8Error),
+        InvalidArrayByteSize(u32), // array byte size should be a mutiple of 32 bits
+        CustomError(String)
+    }
+
+    impl From<str::Utf8Error> for Error {
+        fn from(value: str::Utf8Error) -> Self {
+            Self::InvalidUtfString(value)
+        }
+    }
+
+    macro_rules! parse_field {
+        ($value : expr, $field_desc : tt) => {
+            $value.map_err(|_| Error::MissingField($field_desc))
+        };
+    }
+
+    macro_rules! custom_err {
+        ($($t : tt)+) => {
+            Error::CustomError(format!($($t)+))
+        };
+    }
 
     pub fn parse_u32(iter: &mut impl Iterator<Item = u8>) -> Result<u32> {
-        let bytes = error_context!(
-            @debug = iter.next_chunk::<4>(),
-            "Failed to get 4 bytes for u32/i32 integer."
+        let bytes = parse_field!(
+            iter.next_chunk::<4>(), "4 bytes for u32/i32 integer"
         )?;
+
         Ok(u32_from_bytes(&bytes))
     }
 
@@ -149,24 +176,20 @@ pub mod parsing {
     }
 
     pub fn parse_u32_array(iter: &mut impl Iterator<Item = u8>) -> Result<Vec<u32>> {
-        let size = error_context!(parse_u32(iter), "Failed to get u32 array size")?;
+        let size = parse_field!(parse_u32(iter), "u32 array size")?;
 
         // FIXME: remove this condition and start checking if all the messages/events
         // payload size (in bytes) are multiple or 32 bits
         if size % 4 != 0 {
-            return Err(fallback_error!(
-                "u32 array size (in bytes) '{size}' is not multiple of 32 bits."
-            ));
+            return Err(Error::InvalidArrayByteSize(size));
         };
 
         let array_size = size / 4;
         let mut array = Vec::with_capacity(array_size as usize);
         for i in 0..array_size {
-            let elem = error_context!(
-                parse_u32(iter),
-                "Failed to get all {array_size} elements of array, only gotten = {i}.",
+            let elem = parse_u32(iter).map_err(
+                |_| custom_err!("Failed to get all {array_size} elements of array, only gotten = {i}")
             )?;
-
             array.push(elem);
         }
 
@@ -174,21 +197,16 @@ pub mod parsing {
     }
 
     pub fn parse_str(iter: &mut impl Iterator<Item = u8>) -> Result<String> {
-        let str_size = error_context!(parse_u32(iter), "Failed to get String size.")? as usize;
+        let str_size = parse_field!(parse_u32(iter), "Failed to get String size.")? as usize;
 
         let str_data = next_n_bytes(iter, str_size)
-            .ok_or(fallback_error!("Failed to get {str_size} bytes for str data."))?;
+            .ok_or(custom_err!("Failed to get {str_size} bytes for str data."))?;
 
-        let result = error_context!(
-            str::from_utf8(&str_data[..str_size - 1]),
-            "Failed to parse String data."
-        )?;
+        let result = str::from_utf8(&str_data[..str_size - 1])?;
 
         let padding = str_aligned_size(str_size) - str_size;
-        error_context!(
-            iter.advance_by(padding),
-            "Failed to get the {padding} padding bytes!"
-        )?;
+        iter.advance_by(padding)
+            .map_err(|_| custom_err!("Failed to get the {padding} padding bytes!"))?;
 
         Ok(result.to_string())
     }

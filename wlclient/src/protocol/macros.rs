@@ -32,11 +32,9 @@ macro_rules! declare_interfaces {
             })?
        })?),* $(,)?
     } => {
-        use $crate::{
-            protocol::*,
-            wire_format::parsing as parser,
-            error
-        };
+        use super::wire_format::parsing as parser;
+        use super::*;
+
 
         #[repr(u32)]
         #[allow(clippy::enum_variant_names,non_camel_case_types)] // rust complaining of preffix names
@@ -69,7 +67,7 @@ macro_rules! declare_interfaces {
         @next_request $id : expr, 
         $request : ident ($($args : tt)*) $(=> [$($expr : expr),+ $(,)? ])?; $($t : tt)*
     ) => {
-        pub fn $request (&self, $($args)* ) -> error::Result<usize> {
+        pub fn $request (&self, $($args)* ) -> Result<usize> {
             let values = &[$($($expr,)+)?];
             log::debug!(
                 concat!("{} @ {} -> ", stringify!($request), "({})"),
@@ -138,9 +136,9 @@ macro_rules! declare_interfaces {
                 object_id: WaylandId,
                 event_id: WlEventId,
                 iter: &mut impl Iterator<Item = u8>,
-            ) -> Result<Self::Event, WlEventParseError> {
+            ) -> Result<Self::Event> {
                 $( declare_interfaces!(@next_event object_id, event_id, iter, 0, $($type_def)+); )?
-                Err(WlEventParseError::NoEvent(event_id))
+                Err(Error::NoEvent(event_id))
             }
         }
     };
