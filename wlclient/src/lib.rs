@@ -5,15 +5,14 @@
     iter_advance_by
 )]
 
-use client::WaylandClient;
-use std::env;
-
 pub mod client;
 pub mod error;
 pub mod protocol;
 
 pub use error::{Error, Result};
-pub use protocol::WaylandId;
+pub use client::WaylandClient;
+
+use std::env;
 
 pub fn init_log() {
     if env::var_os("RUST_LOG").is_none() {

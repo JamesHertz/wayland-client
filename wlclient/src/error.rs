@@ -1,4 +1,4 @@
-
+use crate::protocol;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -9,7 +9,7 @@ pub enum Error {
     InvalidInterface,
 
     // other modules errors
-    WlProtocolError(crate::protocol::Error),
+    WlProtocolError(protocol::Error),
     Context { error: Box<Error>, message: String },
     FallBack(Box<dyn std::error::Error>),
 }
@@ -24,7 +24,6 @@ where
     }
 }
 
-
 impl From<protocol::Error> for Error {
     fn from(value: protocol::Error) -> Self {
         Error::WlProtocolError(value)
@@ -34,10 +33,6 @@ impl From<protocol::Error> for Error {
 macro_rules! fallback_error {
     ($($t : tt)*) => { crate::error::Error::FallBack(format!($($t)*).into()) }
 }
-
-//macro_rules! fatal_error {
-//    ($($t : tt)*) => { crate::error::Error::Fatal(format!($($t)*)) }
-//}
 
 macro_rules! error_context{
     ($result : expr, $($t : tt)*) => {
@@ -50,6 +45,3 @@ macro_rules! error_context{
 
 pub(super) use error_context;
 pub(super) use fallback_error;
-
-use crate::protocol;
-//pub(super) use fatal_error;

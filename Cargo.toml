@@ -5,4 +5,4 @@ resolver = "1"
 members  = [
   "wlclient",
   "example-apps/rgb-color-switch"
-, "example-apps/hello-world"]
+, "example-apps/hello-world", "example-apps/mini-ui", "example-apps/fonts"]

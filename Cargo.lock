@@ -35,6 +35,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fonts"
+version = "0.1.0"
+dependencies = [
+ "mini-ui",
+]
+
+[[package]]
 name = "hello-world"
 version = "0.1.0"
 dependencies = [
@@ -91,6 +98,14 @@ checksum = "6585fd95e7bb50d6cc31e20d4cf9afb4e2ba16c5846fc76793f11218da9c475b"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "mini-ui"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "wlclient",
 ]
 
 [[package]]
